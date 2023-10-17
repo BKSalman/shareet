@@ -4,16 +4,12 @@ use raw_window_handle::{
 };
 use renderer::Renderer;
 use shapes::Shape;
-use wgpu::util::DeviceExt;
-use wgpu::{Extent3d, ImageCopyTexture, TextureDescriptor};
 use x11rb::xcb_ffi::XCBConnection;
 use x11rb::{
     connection::Connection,
     protocol::{xproto, Event},
 };
 
-mod buffer;
-mod primitive;
 mod renderer;
 mod shapes;
 
@@ -48,27 +44,6 @@ impl Vertex for VertexColored {
         }
     }
 }
-
-const VERTICES: &[VertexColored] = &[
-    VertexColored {
-        position: [0.0, 0.5, 0.0],
-        color: [1.0, 0.0, 0.0],
-    },
-    VertexColored {
-        position: [-0.5, -0.5, 0.0],
-        color: [0.0, 0.0, 1.0],
-    },
-    VertexColored {
-        position: [0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0],
-    },
-    VertexColored {
-        position: [0.5, 0.5, 0.0],
-        color: [0.5, 0.0, 0.5],
-    },
-];
-
-const INDICES: &[u16] = &[0, 1, 2];
 
 unsafe impl<'a> HasRawWindowHandle for Window<'a> {
     fn raw_window_handle(&self) -> RawWindowHandle {
@@ -178,6 +153,13 @@ impl<'a> State<'a> {
 
         let renderer = Renderer::new(config.format, &device).await;
 
+        // queue.write_texture(wgpu::ImageCopyTexture {
+        //     texture,
+        //     mip_level: 0,
+        //     origin: wgpu::Origin3d::ZERO,
+        //     aspect: wgpu::TextureAspect::All,
+        // }, , , );
+
         State {
             surface,
             device,
@@ -220,15 +202,15 @@ impl<'a> State<'a> {
             vertices: vec![
                 VertexColored {
                     position: [0.0, 0.5, 0.0],
-                    color: [1.0, 0.0, 0.0],
+                    color: [0.5, 0.0, 0.5],
                 },
                 VertexColored {
                     position: [-0.5, -0.5, 0.0],
-                    color: [0.0, 0.0, 1.0],
+                    color: [0.5, 0.0, 0.5],
                 },
                 VertexColored {
                     position: [0.5, -0.5, 0.0],
-                    color: [0.0, 1.0, 0.0],
+                    color: [0.5, 0.0, 0.5],
                 },
             ],
         }]);

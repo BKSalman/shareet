@@ -38,7 +38,7 @@ impl Renderer {
 
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("egui_uniform_bind_group_layout"),
+                label: Some("Uniform Bind Group Layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -52,7 +52,7 @@ impl Renderer {
             });
 
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("egui_uniform_bind_group"),
+            label: Some("Uniform Bind Group"),
             layout: &uniform_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -156,7 +156,6 @@ impl Renderer {
             let vertex_buffer_slice = vertex_buffer_slices.next().unwrap();
 
             render_pass.set_pipeline(&self.pipeline);
-            // TODO: add texture bind group (change index)
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
 
             render_pass.set_index_buffer(
@@ -174,6 +173,8 @@ impl Renderer {
             render_pass.draw_indexed(0..shape.indices.len() as u32, 0, 0..1);
         }
     }
+
+    pub fn update_textures(&mut self, queue: &wgpu::Queue, window_width: u32, window_height: u32) {}
 
     pub fn update_buffers(
         &mut self,

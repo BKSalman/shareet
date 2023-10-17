@@ -123,15 +123,6 @@ async fn run() -> Result<(), Error> {
     //     )?
     //     .check()?;
 
-    // let picture = connection.generate_id()?;
-
-    // let create = CreatePictureAux::new()
-    //     .repeat(Repeat::NORMAL)
-    //     // .graphicsexposure(0xff_ff_ff_ff)
-    //     .polymode(PolyMode::IMPRECISE);
-
-    // connection.render_create_picture(picture, window, format_id, &create)?;
-
     let display_scale = 1.;
 
     let mut font_system = FontSystem::new();
@@ -193,9 +184,9 @@ async fn run() -> Result<(), Error> {
         let event = connection.wait_for_event()?;
         let mut event_option = Some(event);
         while let Some(event) = event_option {
-            if !matches!(event, Event::MotionNotify(_)) {
-                println!("got event: {event:#?}");
-            }
+            // if !matches!(event, Event::MotionNotify(_)) {
+            //     println!("got event: {event:#?}");
+            // }
             match event {
                 Event::ClientMessage(event) => {
                     println!("client message: {event:#?}");
