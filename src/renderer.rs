@@ -1,6 +1,6 @@
 use wgpu::util::DeviceExt;
 
-use crate::shapes::Shape;
+use crate::shapes::Mesh;
 use crate::Vertex;
 use crate::VertexColored;
 use std::num::NonZeroU64;
@@ -8,6 +8,7 @@ use std::ops::Range;
 
 const SCALE_FACTOR: Option<&str> = option_env!("SCALE_FACTOR");
 
+#[derive(Debug)]
 struct SlicedBuffer {
     buffer: wgpu::Buffer,
     slices: Vec<Range<usize>>,
@@ -23,6 +24,16 @@ pub struct Renderer {
     uniform_bind_group: wgpu::BindGroup,
 }
 
+/// Uniform buffer used when rendering.
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+struct UniformBuffer {
+    screen_size_in_points: [f32; 2],
+    // Uniform buffers need to be at least 16 bytes in WebGL.
+    // See https://github.com/gfx-rs/wgpu/issues/2072
+    _padding: [u32; 2],
+}
+
 impl Renderer {
     pub async fn new<'a>(output_color_format: wgpu::TextureFormat, device: &wgpu::Device) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -32,7 +43,10 @@ impl Renderer {
 
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
-            contents: bytemuck::cast_slice(&[0.0, 0.0]),
+            contents: bytemuck::cast_slice(&[UniformBuffer {
+                screen_size_in_points: [0.0, 0.0],
+                _padding: Default::default(),
+            }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -44,7 +58,7 @@ impl Renderer {
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         has_dynamic_offset: false,
-                        min_binding_size: NonZeroU64::new(std::mem::size_of::<[f32; 2]>() as _),
+                        min_binding_size: NonZeroU64::new(std::mem::size_of::<UniformBuffer>() as _),
                         ty: wgpu::BufferBindingType::Uniform,
                     },
                     count: None,
@@ -92,7 +106,7 @@ impl Renderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
                 // Requires Features::DEPTH_CLIP_CONTROL
@@ -148,10 +162,10 @@ impl Renderer {
         }
     }
 
-    pub fn render<'rp>(&'rp self, render_pass: &mut wgpu::RenderPass<'rp>, shapes: &[Shape]) {
+    pub fn render<'rp>(&'rp self, render_pass: &mut wgpu::RenderPass<'rp>, meshes: &[Mesh]) {
         let mut index_buffer_slices = self.index_buffer.slices.iter();
         let mut vertex_buffer_slices = self.vertex_buffer.slices.iter();
-        for shape in shapes {
+        for mesh in meshes {
             let index_buffer_slice = index_buffer_slices.next().unwrap();
             let vertex_buffer_slice = vertex_buffer_slices.next().unwrap();
 
@@ -170,7 +184,8 @@ impl Renderer {
                     .buffer
                     .slice(vertex_buffer_slice.start as u64..vertex_buffer_slice.end as u64),
             );
-            render_pass.draw_indexed(0..shape.indices.len() as u32, 0, 0..1);
+
+            render_pass.draw_indexed(0..mesh.indices.len() as u32, 0, 0..1);
         }
     }
 
@@ -181,12 +196,12 @@ impl Renderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _encoder: &mut wgpu::CommandEncoder,
-        shapes: &[Shape],
+        meshes: &[Mesh],
         window_width: u32,
         window_height: u32,
     ) {
         let (vertex_count, index_count) = {
-            shapes.iter().fold((0, 0), |acc, shape| {
+            meshes.iter().fold((0, 0), |acc, shape| {
                 (acc.0 + shape.vertices.len(), acc.1 + shape.indices.len())
             })
         };
@@ -194,10 +209,13 @@ impl Renderer {
         queue.write_buffer(
             &self.uniform_buffer,
             0,
-            bytemuck::cast_slice(&[
-                window_width as f32 / self.scale_factor,
-                window_height as f32 / self.scale_factor,
-            ]),
+            bytemuck::cast_slice(&[UniformBuffer {
+                screen_size_in_points: [
+                    window_width as f32 / self.scale_factor,
+                    window_height as f32 / self.scale_factor,
+                ],
+                _padding: Default::default(),
+            }]),
         );
 
         if index_count > 0 {
@@ -224,11 +242,11 @@ impl Renderer {
                 )
                 .expect("Failed to create staging buffer for index data");
             let mut index_offset = 0;
-            for shape in shapes {
-                let size = shape.indices.len() * std::mem::size_of::<u32>();
+            for mesh in meshes {
+                let size = mesh.indices.len() * std::mem::size_of::<u32>();
                 let slice = index_offset..(size + index_offset);
                 index_buffer_staging[slice.clone()]
-                    .copy_from_slice(bytemuck::cast_slice(&shape.indices));
+                    .copy_from_slice(bytemuck::cast_slice(&mesh.indices));
                 self.index_buffer.slices.push(slice);
                 index_offset += size;
             }
@@ -258,11 +276,11 @@ impl Renderer {
                 )
                 .expect("Failed to create staging buffer for vertex data");
             let mut vertex_offset = 0;
-            for shape in shapes {
-                let size = shape.vertices.len() * std::mem::size_of::<VertexColored>();
+            for mesh in meshes {
+                let size = mesh.vertices.len() * std::mem::size_of::<VertexColored>();
                 let slice = vertex_offset..(size + vertex_offset);
                 vertex_buffer_staging[slice.clone()]
-                    .copy_from_slice(bytemuck::cast_slice(&shape.vertices));
+                    .copy_from_slice(bytemuck::cast_slice(&mesh.vertices));
                 self.vertex_buffer.slices.push(slice);
                 vertex_offset += size;
             }

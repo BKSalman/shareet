@@ -1,17 +1,49 @@
+use painter::Painter;
 use raw_window_handle::{
     HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle, XcbDisplayHandle,
     XcbWindowHandle,
 };
 use renderer::Renderer;
-use shapes::Shape;
+use shapes::Mesh;
 use x11rb::xcb_ffi::XCBConnection;
 use x11rb::{
     connection::Connection,
     protocol::{xproto, Event},
 };
 
+mod painter;
 mod renderer;
-mod shapes;
+pub mod shapes;
+
+pub struct Color {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+}
+
+impl Color {
+    pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self { r, g, b, a }
+    }
+
+    pub fn rgba_f32(&self) -> [f32; 4] {
+        [
+            self.r as f32 / 255.,
+            self.g as f32 / 255.,
+            self.b as f32 / 255.,
+            self.a as f32 / 255.,
+        ]
+    }
+
+    pub fn rgb_f32(&self) -> [f32; 3] {
+        [
+            self.r as f32 / 255.,
+            self.g as f32 / 255.,
+            self.b as f32 / 255.,
+        ]
+    }
+}
 
 pub trait Vertex: bytemuck::Pod + bytemuck::Zeroable {
     fn desc() -> wgpu::VertexBufferLayout<'static>;
@@ -84,6 +116,7 @@ pub struct State<'a> {
     // unsafe references to the window's resources.
     window: Window<'a>,
     renderer: Renderer,
+    pub painter: Painter,
 }
 
 impl<'a> State<'a> {
@@ -152,6 +185,7 @@ impl<'a> State<'a> {
         surface.configure(&device, &config);
 
         let renderer = Renderer::new(config.format, &device).await;
+        let painter = Painter::new();
 
         // queue.write_texture(wgpu::ImageCopyTexture {
         //     texture,
@@ -169,6 +203,7 @@ impl<'a> State<'a> {
             height: height as u32,
             window,
             renderer,
+            painter,
         }
     }
 
@@ -197,29 +232,11 @@ impl<'a> State<'a> {
                 label: Some("Render Encoder"),
             });
 
-        let shapes = Vec::from([Shape {
-            indices: vec![0, 1, 2],
-            vertices: vec![
-                VertexColored {
-                    position: [0.0, 0.5, 0.0],
-                    color: [0.5, 0.0, 0.5],
-                },
-                VertexColored {
-                    position: [-0.5, -0.5, 0.0],
-                    color: [0.5, 0.0, 0.5],
-                },
-                VertexColored {
-                    position: [0.5, -0.5, 0.0],
-                    color: [0.5, 0.0, 0.5],
-                },
-            ],
-        }]);
-
         self.renderer.update_buffers(
             &self.device,
             &self.queue,
             &mut encoder,
-            &shapes,
+            self.painter.meshes(),
             self.width,
             self.height,
         );
@@ -257,25 +274,8 @@ impl<'a> State<'a> {
                 depth_stencil_attachment: None,
             });
 
-            let shapes = Vec::from([Shape {
-                indices: vec![0, 1, 2],
-                vertices: vec![
-                    VertexColored {
-                        position: [0.0, 0.5, 0.0],
-                        color: [1.0, 0.0, 0.0],
-                    },
-                    VertexColored {
-                        position: [-0.5, -0.5, 0.0],
-                        color: [0.0, 0.0, 1.0],
-                    },
-                    VertexColored {
-                        position: [0.5, -0.5, 0.0],
-                        color: [0.0, 1.0, 0.0],
-                    },
-                ],
-            }]);
-
-            self.renderer.render(&mut render_pass, &shapes);
+            self.renderer
+                .render(&mut render_pass, self.painter.meshes());
         }
 
         // submit will accept anything that implements IntoIter

@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache};
-use idkman::{Atoms, State, Window};
+use idkman::{
+    shapes::{Circle, Rect, Shape, Triangle},
+    Atoms, State, Window,
+};
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -161,6 +164,44 @@ async fn run() -> Result<(), Error> {
     };
 
     let mut state = State::new(window).await;
+
+    state.painter.add_shape_absolute(
+        Shape::Rect(Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+        }),
+        idkman::Color::new(0, 0, 0, 255),
+    );
+
+    state.painter.add_shape_absolute(
+        Shape::Rect(Rect {
+            x: 200,
+            y: 200,
+            width: 500,
+            height: 500,
+        }),
+        idkman::Color::new(180, 0, 180, 255),
+    );
+
+    state.painter.add_shape_absolute(
+        Shape::Circle(Circle {
+            x: 200,
+            y: 200,
+            radius: 20.,
+        }),
+        idkman::Color::new(0, 0, 0, 255),
+    );
+
+    state.painter.add_shape_absolute(
+        Shape::Triangle(Triangle {
+            a: (100, 100),
+            b: (150, 200),
+            c: (50, 200),
+        }),
+        idkman::Color::new(0, 0, 0, 255),
+    );
 
     let mut redraw = true;
 

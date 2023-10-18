@@ -17,6 +17,7 @@
               extensions = [ "rust-src" "rust-analyzer" ];
             })
             gdb
+            renderdoc
           ];
           
           nativeBuildInputs = [
