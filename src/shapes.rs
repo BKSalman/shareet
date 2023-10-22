@@ -1,11 +1,12 @@
 use crate::VertexColored;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Mesh {
     pub indices: Vec<u32>,
     pub vertices: Vec<VertexColored>,
 }
 
+#[derive(Debug)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,

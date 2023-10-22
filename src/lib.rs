@@ -1,3 +1,4 @@
+use glyphon::{Attrs, Family, FontSystem, Metrics, Shaping, SwashCache, TextAtlas};
 use painter::Painter;
 use raw_window_handle::{
     HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle, XcbDisplayHandle,
@@ -5,15 +6,27 @@ use raw_window_handle::{
 };
 use renderer::Renderer;
 use shapes::Mesh;
+use text_renderer::Text;
+use wgpu::MultisampleState;
+use widgets::Widget;
+use x11rb::protocol::xproto::{
+    AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, Screen, WindowClass,
+};
+use x11rb::wrapper::ConnectionExt as _;
 use x11rb::xcb_ffi::XCBConnection;
 use x11rb::{
     connection::Connection,
     protocol::{xproto, Event},
 };
+use x11rb::{COPY_DEPTH_FROM_PARENT, COPY_FROM_PARENT};
 
 mod painter;
 mod renderer;
 pub mod shapes;
+pub mod text_renderer;
+pub mod widgets;
+
+pub type Error = Box<dyn std::error::Error>;
 
 pub struct Color {
     r: u8,
@@ -23,8 +36,11 @@ pub struct Color {
 }
 
 impl Color {
-    pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
+    pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
+    }
+    pub fn rgb(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b, a: 255 }
     }
 
     pub fn rgba_f32(&self) -> [f32; 4] {
@@ -80,7 +96,7 @@ impl Vertex for VertexColored {
 unsafe impl<'a> HasRawWindowHandle for Window<'a> {
     fn raw_window_handle(&self) -> RawWindowHandle {
         let mut window_handle = XcbWindowHandle::empty();
-        window_handle.window = self.xid.try_into().unwrap();
+        window_handle.window = self.xid;
         RawWindowHandle::Xcb(window_handle)
     }
 }
@@ -95,6 +111,7 @@ unsafe impl<'a> HasRawDisplayHandle for Window<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct Window<'a> {
     pub xid: xproto::Window,
     pub connection: &'a XCBConnection,
@@ -102,6 +119,22 @@ pub struct Window<'a> {
     pub width: u32,
     pub height: u32,
     pub atoms: Atoms,
+    pub display_scale: f32,
+}
+
+pub struct Bar<'a> {
+    pub state: State<'a>,
+    pub widgets: Vec<Box<dyn Widget>>,
+}
+
+impl<'a> Bar<'a> {
+    pub async fn new(window: Window<'a>, screen: &'a Screen) -> Bar<'a> {
+        let state = State::new(window, screen).await;
+        Self {
+            state,
+            widgets: vec![],
+        }
+    }
 }
 
 pub struct State<'a> {
@@ -114,14 +147,17 @@ pub struct State<'a> {
     // The window must be declared after the surface so
     // it gets dropped after it as the surface contains
     // unsafe references to the window's resources.
-    window: Window<'a>,
+    pub window: Window<'a>,
     renderer: Renderer,
+    pub text_renderer: crate::text_renderer::TextRenderer,
     pub painter: Painter,
+    pub current_tag_index: Option<usize>,
+    pub screen: &'a Screen,
 }
 
 impl<'a> State<'a> {
     // Creating some of the wgpu types requires async code
-    pub async fn new(window: Window<'a>) -> State {
+    pub async fn new(window: Window<'a>, screen: &'a Screen) -> State<'a> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             dx12_shader_compiler: Default::default(),
@@ -176,8 +212,8 @@ impl<'a> State<'a> {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
-            width: width as u32,
-            height: height as u32,
+            width,
+            height,
             present_mode: surface_caps.present_modes[0],
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
@@ -187,23 +223,33 @@ impl<'a> State<'a> {
         let renderer = Renderer::new(config.format, &device).await;
         let painter = Painter::new();
 
-        // queue.write_texture(wgpu::ImageCopyTexture {
-        //     texture,
-        //     mip_level: 0,
-        //     origin: wgpu::Origin3d::ZERO,
-        //     aspect: wgpu::TextureAspect::All,
-        // }, , , );
+        let font_system = FontSystem::new();
+        let text_cache = SwashCache::new();
+        let mut atlas = TextAtlas::new(&device, &queue, surface_format);
+        let text_renderer =
+            glyphon::TextRenderer::new(&mut atlas, &device, MultisampleState::default(), None);
+
+        let text_renderer = crate::text_renderer::TextRenderer {
+            renderer: text_renderer,
+            cache: text_cache,
+            font_system,
+            atlas,
+            texts: Vec::new(),
+        };
 
         State {
             surface,
             device,
             queue,
             config,
-            width: width as u32,
-            height: height as u32,
+            width,
+            height,
             window,
             renderer,
             painter,
+            text_renderer,
+            current_tag_index: None,
+            screen,
         }
     }
 
@@ -218,6 +264,8 @@ impl<'a> State<'a> {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
+            self.text_renderer
+                .resize(width as f32, height as f32, self.window.display_scale);
         }
     }
 
@@ -225,24 +273,29 @@ impl<'a> State<'a> {
         false
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self, meshes: &[Mesh], texts: &[Text]) -> Result<(), wgpu::SurfaceError> {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
 
+        self.text_renderer
+            .prepare(&self.device, &self.queue, self.width, self.height, texts)?;
+
         self.renderer.update_buffers(
             &self.device,
             &self.queue,
             &mut encoder,
-            self.painter.meshes(),
+            meshes,
             self.width,
             self.height,
         );
+
+        Ok(())
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self, meshes: &[Mesh]) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
 
         let view = output
@@ -274,15 +327,56 @@ impl<'a> State<'a> {
                 depth_stencil_attachment: None,
             });
 
-            self.renderer
-                .render(&mut render_pass, self.painter.meshes());
+            self.renderer.render(&mut render_pass, meshes);
+            self.text_renderer.render(&mut render_pass).unwrap();
         }
 
-        // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
+        self.text_renderer.trim();
+
+        self.text_renderer.texts.clear();
+        self.painter.meshes.clear();
+
         Ok(())
+    }
+
+    pub fn add_text_absolute(&mut self, content: &str, x: i32, y: i32, color: glyphon::Color) {
+        let mut text_buffer = glyphon::Buffer::new(
+            &mut self.text_renderer.font_system,
+            Metrics::new(self.height as f32, self.height as f32),
+        );
+
+        let physical_width = self.width as f32 * self.window.display_scale;
+        let physical_height = self.height as f32 * self.window.display_scale;
+
+        text_buffer.set_size(
+            &mut self.text_renderer.font_system,
+            physical_width,
+            physical_height,
+        );
+        text_buffer.set_text(
+            &mut self.text_renderer.font_system,
+            content,
+            Attrs::new().family(Family::SansSerif),
+            Shaping::Advanced,
+        );
+        text_buffer.shape_until_scroll(&mut self.text_renderer.font_system);
+
+        self.text_renderer.add_text(Text {
+            x,
+            y,
+            color,
+            content: content.to_string(),
+            bounds: glyphon::TextBounds {
+                left: 0,
+                top: 0,
+                right: self.width as i32,
+                bottom: self.height as i32,
+            },
+            buffer: text_buffer,
+        });
     }
 }
 
@@ -325,8 +419,151 @@ x11rb::atom_manager! {
         _NET_WM_STRUT_PARTIAL,
 
         _NET_WM_NAME,
+        WM_NAME,
 
         WM_PROTOCOLS,
+        _NET_WM_PING,
         WM_DELETE_WINDOW,
     }
+}
+
+pub fn create_window(
+    connection: &XCBConnection,
+    width: u16,
+    height: u16,
+    screen_num: usize,
+    display_scale: f32,
+) -> Result<Window, Error> {
+    let screen = &connection.setup().roots[screen_num];
+
+    let atoms = Atoms::new(connection)?.reply()?;
+
+    let window_id = connection.generate_id()?;
+
+    let create = CreateWindowAux::new().event_mask(
+        EventMask::EXPOSURE
+            | EventMask::STRUCTURE_NOTIFY
+            | EventMask::VISIBILITY_CHANGE
+            | EventMask::KEY_PRESS
+            | EventMask::KEY_RELEASE
+            | EventMask::KEYMAP_STATE
+            | EventMask::BUTTON_PRESS
+            | EventMask::BUTTON_RELEASE
+            | EventMask::POINTER_MOTION
+            | EventMask::PROPERTY_CHANGE,
+    );
+
+    connection.create_window(
+        COPY_DEPTH_FROM_PARENT,
+        window_id,
+        screen.root,
+        0,
+        (screen.height_in_pixels - height) as i16,
+        width,
+        height,
+        0,
+        WindowClass::INPUT_OUTPUT,
+        COPY_FROM_PARENT,
+        &create,
+    )?;
+
+    connection
+        .change_property8(
+            PropMode::REPLACE,
+            window_id,
+            atoms._NET_WM_NAME,
+            AtomEnum::STRING,
+            b"lmao",
+        )?
+        .check()?;
+
+    connection
+        .change_property8(
+            PropMode::REPLACE,
+            window_id,
+            atoms.WM_NAME,
+            AtomEnum::STRING,
+            b"lmao",
+        )?
+        .check()?;
+
+    connection
+        .change_property8(
+            PropMode::REPLACE,
+            window_id,
+            x11rb::protocol::xproto::Atom::from(x11rb::protocol::xproto::AtomEnum::WM_CLASS),
+            AtomEnum::STRING,
+            b"lmao",
+        )?
+        .check()?;
+
+    connection
+        .change_property32(
+            PropMode::REPLACE,
+            window_id,
+            atoms._NET_WM_WINDOW_TYPE,
+            AtomEnum::ATOM,
+            &[atoms._NET_WM_WINDOW_TYPE_DOCK],
+        )?
+        .check()?;
+
+    // connection
+    //     .change_property32(
+    //         PropMode::REPLACE,
+    //         window_id,
+    //         atoms.WM_PROTOCOLS,
+    //         AtomEnum::ATOM,
+    //         &[atoms.WM_DELETE_WINDOW, atoms._NET_WM_PING],
+    //     )?
+    //     .check()?;
+
+    connection
+        .change_property32(
+            PropMode::REPLACE,
+            window_id,
+            atoms._NET_WM_STATE,
+            AtomEnum::ATOM,
+            &[atoms._NET_WM_STATE_STICKY, atoms._NET_WM_STATE_ABOVE],
+        )?
+        .check()?;
+
+    connection
+        .change_property32(
+            PropMode::REPLACE,
+            window_id,
+            atoms._NET_WM_STRUT_PARTIAL,
+            AtomEnum::CARDINAL,
+            // left, right, top, bottom, left_start_y, left_end_y,
+            // right_start_y, right_end_y, top_start_x, top_end_x, bottom_start_x,
+            // bottom_end_x
+            &[
+                0,
+                0,
+                0,
+                height as u32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                screen.width_in_pixels as u32,
+            ],
+        )?
+        .check()?;
+
+    connection.map_window(window_id)?;
+
+    connection.flush()?;
+
+    Ok(Window {
+        xid: window_id,
+        connection,
+        screen_num,
+        width: width as u32,
+        height: height as u32,
+        atoms,
+        display_scale,
+    })
 }

@@ -32,8 +32,6 @@
             wayland
             libGL
 
-            # auto reload server on save
-            # cargo watch -x run
             cargo-watch
             pkg-config
             xorg.libXcursor

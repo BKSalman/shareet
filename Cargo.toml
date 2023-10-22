@@ -1,19 +1,20 @@
 [package]
-name = "idkman"
+name = "shareet"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cosmic-text = "0.9.0"
 x11rb = { version = "0.12.0", features = ["allow-unsafe-code"] }
-fontdb = { version = "0.14.1", default-features = false, features = ["fontconfig"] }
 raw-window-handle = "0.5.2"
 wgpu = { version = "0.17.1", features = ["vulkan-portability"]}
 pollster = "0.3.0"
 bytemuck = { version = "1.14.0", features = ["derive"] }
 glam = "0.24.2"
+glyphon = { git = "https://github.com/grovesNL/glyphon" }
+indexmap = "2.0.2"
+# winit = { version = "0.28.7", default-features = false, features = ["x11"] }
 
 [dependencies.image]
 version = "0.24"

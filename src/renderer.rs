@@ -1,5 +1,6 @@
 use wgpu::util::DeviceExt;
 
+use crate::painter::MeshHandle;
 use crate::shapes::Mesh;
 use crate::Vertex;
 use crate::VertexColored;
@@ -15,6 +16,7 @@ struct SlicedBuffer {
     capacity: wgpu::BufferAddress,
 }
 
+#[derive(Debug)]
 pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     index_buffer: SlicedBuffer,
@@ -201,8 +203,8 @@ impl Renderer {
         window_height: u32,
     ) {
         let (vertex_count, index_count) = {
-            meshes.iter().fold((0, 0), |acc, shape| {
-                (acc.0 + shape.vertices.len(), acc.1 + shape.indices.len())
+            meshes.iter().fold((0, 0), |acc, mesh| {
+                (acc.0 + mesh.vertices.len(), acc.1 + mesh.indices.len())
             })
         };
 

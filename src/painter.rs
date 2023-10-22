@@ -1,55 +1,123 @@
+use indexmap::IndexMap;
+
 use crate::{
     shapes::{Mesh, Shape},
     VertexColored,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Default, Hash, PartialEq, Eq, Copy, Clone)]
+pub struct MeshHandle(u64);
+
+#[derive(Debug, Default)]
 pub struct Painter {
-    meshes: Vec<Mesh>,
+    pub(crate) meshes: IndexMap<MeshHandle, Mesh>,
+    next_mesh_id: u64,
     current_x: u32,
     current_y: u32,
 }
 
 impl Painter {
     pub fn new() -> Self {
-        Self {
-            meshes: Vec::new(),
-            current_x: 0,
-            current_y: 0,
-        }
+        Self::default()
     }
 
-    pub fn add_shape_absolute(&mut self, shape: Shape, color: crate::Color) {
+    /// adds a shape in an absolute position and returns the index to it
+    pub fn add_shape_absolute(&mut self, shape: Shape, color: crate::Color) -> MeshHandle {
         let color = color.rgb_f32();
+        let mesh_handle = MeshHandle(self.next_mesh_id);
+        self.next_mesh_id += 1;
         match shape {
             Shape::Rect(rect) => {
-                self.meshes.push(Mesh {
-                    indices: vec![0, 1, 2, 0, 2, 3],
-                    vertices: vec![
-                        VertexColored {
-                            position: [rect.x as f32, rect.y as f32, 0.],
-                            color,
-                        },
-                        VertexColored {
-                            position: [rect.x as f32, rect.y as f32 + rect.height as f32, 0.],
-                            color,
-                        },
-                        VertexColored {
-                            position: [
-                                rect.x as f32 + rect.width as f32,
-                                rect.y as f32 + rect.height as f32,
-                                0.,
-                            ],
-                            color,
-                        },
-                        VertexColored {
-                            position: [rect.x as f32 + rect.width as f32, rect.y as f32, 0.],
-                            color,
-                        },
-                    ],
-                });
+                self.meshes.insert(
+                    mesh_handle,
+                    Mesh {
+                        indices: vec![0, 1, 2, 0, 2, 3],
+                        vertices: vec![
+                            VertexColored {
+                                position: [rect.x as f32, rect.y as f32, 0.],
+                                color,
+                            },
+                            VertexColored {
+                                position: [rect.x as f32, rect.y as f32 + rect.height as f32, 0.],
+                                color,
+                            },
+                            VertexColored {
+                                position: [
+                                    rect.x as f32 + rect.width as f32,
+                                    rect.y as f32 + rect.height as f32,
+                                    0.,
+                                ],
+                                color,
+                            },
+                            VertexColored {
+                                position: [rect.x as f32 + rect.width as f32, rect.y as f32, 0.],
+                                color,
+                            },
+                        ],
+                    },
+                );
             }
-            Shape::Triangle(triangle) => self.meshes.push(Mesh {
+            Shape::Triangle(triangle) => {
+                self.meshes.insert(
+                    mesh_handle,
+                    Mesh {
+                        indices: vec![0, 1, 2],
+                        vertices: vec![
+                            VertexColored {
+                                position: [triangle.a.0 as f32, triangle.a.1 as f32, 0.],
+                                color,
+                            },
+                            VertexColored {
+                                position: [triangle.b.0 as f32, triangle.b.1 as f32, 0.],
+                                color,
+                            },
+                            VertexColored {
+                                position: [triangle.c.0 as f32, triangle.c.1 as f32, 0.],
+                                color,
+                            },
+                        ],
+                    },
+                );
+            }
+            Shape::Circle(circle) => {
+                let (vertices, indices) =
+                    create_circle_vertices(circle.radius, 30, color, circle.x, circle.y);
+                self.meshes.insert(mesh_handle, Mesh { indices, vertices });
+            }
+        }
+
+        mesh_handle
+    }
+
+    pub fn create_mesh(shape: Shape, color: crate::Color) -> Mesh {
+        let color = color.rgb_f32();
+        match shape {
+            Shape::Rect(rect) => Mesh {
+                indices: vec![0, 1, 2, 0, 2, 3],
+                vertices: vec![
+                    VertexColored {
+                        position: [rect.x as f32, rect.y as f32, 0.],
+                        color,
+                    },
+                    VertexColored {
+                        position: [rect.x as f32, rect.y as f32 + rect.height as f32, 0.],
+                        color,
+                    },
+                    VertexColored {
+                        position: [
+                            rect.x as f32 + rect.width as f32,
+                            rect.y as f32 + rect.height as f32,
+                            0.,
+                        ],
+                        color,
+                    },
+                    VertexColored {
+                        position: [rect.x as f32 + rect.width as f32, rect.y as f32, 0.],
+                        color,
+                    },
+                ],
+            },
+            Shape::Triangle(triangle) => Mesh {
                 indices: vec![0, 1, 2],
                 vertices: vec![
                     VertexColored {
@@ -65,17 +133,21 @@ impl Painter {
                         color,
                     },
                 ],
-            }),
+            },
             Shape::Circle(circle) => {
                 let (vertices, indices) =
                     create_circle_vertices(circle.radius, 30, color, circle.x, circle.y);
-                self.meshes.push(Mesh { indices, vertices });
+                Mesh { indices, vertices }
             }
         }
     }
 
-    pub fn meshes(&self) -> &Vec<Mesh> {
-        &self.meshes
+    pub fn meshes(&self) -> Vec<(&MeshHandle, &Mesh)> {
+        self.meshes.iter().collect()
+    }
+
+    pub fn remove_mesh(&mut self, handle: MeshHandle) -> Option<(MeshHandle, Mesh)> {
+        self.meshes.shift_remove_entry(&handle)
     }
 }
 
