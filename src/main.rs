@@ -1,11 +1,6 @@
 use std::sync::Arc;
 
-use shareet::{
-    create_window,
-    shapes::{Rect, Shape},
-    widgets::Widget,
-    Bar, Error,
-};
+use shareet::{create_window, widgets::pager::Pager, Bar, Error};
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -15,11 +10,27 @@ use x11rb::{
     xcb_ffi::XCBConnection,
 };
 
+#[cfg(feature = "profiling")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 fn main() {
     let _ = pollster::block_on(run());
 }
 
 async fn run() -> Result<(), Error> {
+    #[cfg(feature = "profiling")]
+    let profiler = dhat::Profiler::new_heap();
+    #[cfg(feature = "profiling")]
+    println!("Profiling...");
+
+    #[cfg(feature = "profiling")]
+    let (sender, receiver) = std::sync::mpsc::channel();
+
+    #[cfg(feature = "profiling")]
+    ctrlc::set_handler(move || sender.send(()).expect("Could not send signal on channel."))
+        .expect("Error setting Ctrl-C handler");
+
     let (connection, screen_num) = XCBConnection::connect(None)?;
 
     let connection = Arc::new(connection);
@@ -38,16 +49,6 @@ async fn run() -> Result<(), Error> {
 
     let mut bar = Bar::new(window, screen).await;
 
-    bar.state.painter.add_shape_absolute(
-        Shape::Rect(Rect {
-            x: 0,
-            y: 0,
-            width: 500,
-            height: height as u32,
-        }),
-        shareet::Color::rgb(255, 255, 255),
-    );
-
     let mut redraw = true;
 
     connection.flush()?;
@@ -58,35 +59,56 @@ async fn run() -> Result<(), Error> {
         .change_window_attributes(screen.root, &change)?
         .check()?;
 
-    let mut pager = shareet::widgets::pager::Pager {
-        text_metrics: glyphon::Metrics::new(bar.state.height as f32, bar.state.height as f32),
-        text_color: glyphon::Color::rgb(0, 0, 0),
-        selector_mesh: None,
-        desktops: vec![],
-        atoms: shareet::widgets::pager::PagerAtoms::new(connection.as_ref())?.reply()?,
-        requires_redraw: true,
-        texts: vec![],
-    };
-
-    pager.setup(&bar.state, &connection, screen_num).unwrap();
+    let pager = Pager::new(
+        &connection,
+        glyphon::Metrics::new(bar.state.height as f32, bar.state.height as f32),
+        glyphon::Color::rgb(0, 0, 0),
+        5,
+    )?;
 
     bar.widgets.push(Box::new(pager));
 
+    let pager = Pager::new(
+        &connection,
+        glyphon::Metrics::new(bar.state.height as f32, bar.state.height as f32),
+        glyphon::Color::rgb(0, 0, 0),
+        5,
+    )?;
+
+    bar.widgets.push(Box::new(pager));
+
+    for widget in bar.widgets.iter_mut() {
+        widget
+            .setup(&mut bar.state, &connection, screen_num)
+            .unwrap();
+    }
+
     loop {
+        #[cfg(feature = "profiling")]
+        match receiver.try_recv() {
+            Ok(_) => {
+                drop(profiler);
+                std::process::exit(0);
+            }
+            Err(_) => {}
+        }
         if redraw {
-            let (meshes, texts) =
-                bar.widgets
-                    .iter()
-                    .fold((Vec::new(), Vec::new()), |mut acc, w| {
-                        if w.requires_redraw() {
-                            acc.0.extend(w.meshes());
-                            acc.1
-                                .extend(w.texts(&mut bar.state.text_renderer.font_system));
-                        }
-                        return acc;
-                    });
-            bar.state.update(&meshes, &texts)?;
-            match bar.state.render(&meshes) {
+            let (meshes, texts, _) = bar.widgets.iter().fold(
+                (Vec::new(), Vec::new(), 0.),
+                |(mut meshes, mut texts, offset), w| {
+                    meshes.extend(w.meshes().into_iter().map(|m| (m, offset)));
+                    texts.extend(
+                        w.texts(&mut bar.state.text_renderer.font_system)
+                            .into_iter()
+                            .map(|t| (t, offset)),
+                    );
+                    let size = w.size();
+                    return (meshes, texts, offset + size as f32);
+                },
+            );
+
+            bar.state.update(meshes.clone(), texts)?;
+            match bar.state.render(meshes) {
                 Ok(_) => {}
                 // Reconfigure the surface if lost
                 Err(wgpu::SurfaceError::Lost) => {
@@ -118,7 +140,6 @@ async fn run() -> Result<(), Error> {
                 Event::PropertyNotify(event) if event.window == screen.root => {
                     redraw = true;
                 }
-                Event::MotionNotify(_) => redraw = true,
                 Event::Expose(event) => {
                     let width = event.width as u32;
                     let height = event.height as u32;
@@ -130,17 +151,6 @@ async fn run() -> Result<(), Error> {
                 }
                 Event::LeaveNotify(_) => redraw = true,
                 Event::EnterNotify(_) => redraw = true,
-                // Event::ResizeRequest(event) => {
-                //     let width = event.width as u32;
-                //     let height = event.height as u32;
-                //     let configure = ConfigureWindowAux::new().width(width).height(height);
-                //     connection.configure_window(event.window, &configure)?;
-                //     state.resize(width, height);
-
-                //     println!("resize");
-
-                //     request_redraw(&mut redraw)
-                // }
                 Event::ConfigureNotify(event) => {
                     let width = event.width as u32;
                     let height = event.height as u32;

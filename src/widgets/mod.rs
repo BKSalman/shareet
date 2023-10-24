@@ -4,11 +4,12 @@ use x11rb::xcb_ffi::XCBConnection;
 use crate::{shapes::Mesh, text_renderer::Text, State};
 
 pub mod pager;
+pub mod text;
 
 pub trait Widget {
     fn setup(
         &mut self,
-        state: &State,
+        state: &mut State,
         connection: &XCBConnection,
         screen_num: usize,
     ) -> Result<(), crate::Error>;
@@ -19,10 +20,10 @@ pub trait Widget {
         event: x11rb::protocol::Event,
     ) -> Result<(), crate::Error>;
 
-    fn meshes(&self) -> Vec<Mesh> {
+    fn meshes(&self) -> Vec<&Mesh> {
         vec![]
     }
-    fn texts(&self, _font_system: &mut FontSystem) -> Vec<Text> {
+    fn texts(&self, _font_system: &mut FontSystem) -> Vec<&Text> {
         vec![]
     }
     fn size(&self) -> u32 {

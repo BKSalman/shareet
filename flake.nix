@@ -18,6 +18,7 @@
             })
             gdb
             renderdoc
+            cargo-watch
           ];
           
           nativeBuildInputs = [
@@ -32,7 +33,6 @@
             wayland
             libGL
 
-            cargo-watch
             pkg-config
             xorg.libXcursor
             xorg.libXi

@@ -1,6 +1,5 @@
 use wgpu::util::DeviceExt;
 
-use crate::painter::MeshHandle;
 use crate::shapes::Mesh;
 use crate::Vertex;
 use crate::VertexColored;
@@ -164,10 +163,14 @@ impl Renderer {
         }
     }
 
-    pub fn render<'rp>(&'rp self, render_pass: &mut wgpu::RenderPass<'rp>, meshes: &[Mesh]) {
+    pub fn render<'rp>(
+        &'rp self,
+        render_pass: &mut wgpu::RenderPass<'rp>,
+        meshes: Vec<(&Mesh, f32)>,
+    ) {
         let mut index_buffer_slices = self.index_buffer.slices.iter();
         let mut vertex_buffer_slices = self.vertex_buffer.slices.iter();
-        for mesh in meshes {
+        for (mesh, _offset) in meshes {
             let index_buffer_slice = index_buffer_slices.next().unwrap();
             let vertex_buffer_slice = vertex_buffer_slices.next().unwrap();
 
@@ -191,19 +194,19 @@ impl Renderer {
         }
     }
 
-    pub fn update_textures(&mut self, queue: &wgpu::Queue, window_width: u32, window_height: u32) {}
+    // pub fn update_textures(&mut self, queue: &wgpu::Queue, window_width: u32, window_height: u32) {}
 
     pub fn update_buffers(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _encoder: &mut wgpu::CommandEncoder,
-        meshes: &[Mesh],
+        meshes: Vec<(&Mesh, f32)>,
         window_width: u32,
         window_height: u32,
     ) {
         let (vertex_count, index_count) = {
-            meshes.iter().fold((0, 0), |acc, mesh| {
+            meshes.iter().fold((0, 0), |acc, (mesh, _offset)| {
                 (acc.0 + mesh.vertices.len(), acc.1 + mesh.indices.len())
             })
         };
@@ -244,7 +247,7 @@ impl Renderer {
                 )
                 .expect("Failed to create staging buffer for index data");
             let mut index_offset = 0;
-            for mesh in meshes {
+            for (mesh, _offset) in &meshes {
                 let size = mesh.indices.len() * std::mem::size_of::<u32>();
                 let slice = index_offset..(size + index_offset);
                 index_buffer_staging[slice.clone()]
@@ -278,11 +281,19 @@ impl Renderer {
                 )
                 .expect("Failed to create staging buffer for vertex data");
             let mut vertex_offset = 0;
-            for mesh in meshes {
+            for (mesh, offset) in meshes {
                 let size = mesh.vertices.len() * std::mem::size_of::<VertexColored>();
                 let slice = vertex_offset..(size + vertex_offset);
+                let vertices: Vec<VertexColored> = mesh
+                    .vertices
+                    .iter()
+                    .map(|v| VertexColored {
+                        position: v.add_offset(offset),
+                        color: v.color,
+                    })
+                    .collect();
                 vertex_buffer_staging[slice.clone()]
-                    .copy_from_slice(bytemuck::cast_slice(&mesh.vertices));
+                    .copy_from_slice(bytemuck::cast_slice(&vertices));
                 self.vertex_buffer.slices.push(slice);
                 vertex_offset += size;
             }

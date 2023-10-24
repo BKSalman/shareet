@@ -14,27 +14,47 @@ use crate::{
     State,
 };
 
-use super::Widget;
+use super::{text::TextWidget, Widget};
 
 pub struct Pager {
-    pub text_metrics: glyphon::Metrics,
-    pub text_color: glyphon::Color,
-    pub selector_mesh: Option<Mesh>,
-    pub desktops: Vec<(i32, String)>,
-    pub atoms: PagerAtoms,
-    pub requires_redraw: bool,
-    pub texts: Vec<Text>,
+    text_metrics: glyphon::Metrics,
+    text_color: glyphon::Color,
+    selector_mesh: Option<Mesh>,
+    desktops: Vec<TextWidget>,
+    atoms: PagerAtoms,
+    requires_redraw: bool,
+    padding: i32,
+    size: u32,
+}
+
+impl Pager {
+    pub fn new(
+        connection: &XCBConnection,
+        text_metrics: glyphon::Metrics,
+        text_color: glyphon::Color,
+        padding: i32,
+    ) -> Result<Self, crate::Error> {
+        Ok(Self {
+            text_metrics,
+            text_color,
+            selector_mesh: None,
+            atoms: PagerAtoms::new(connection)?.reply()?,
+            requires_redraw: true,
+            desktops: Vec::new(),
+            padding,
+            size: 0,
+        })
+    }
 }
 
 impl Widget for Pager {
     fn setup(
         &mut self,
-        state: &State,
+        state: &mut State,
         connection: &XCBConnection,
         screen_num: usize,
     ) -> Result<(), crate::Error> {
         let screen = &connection.setup().roots[screen_num];
-        let padding = 5;
 
         let desktops = connection
             .get_property(
@@ -48,15 +68,30 @@ impl Widget for Pager {
             .reply()?;
         let desktops = get_desktop_names(desktops.value);
 
-        self.desktops = desktops
-            .into_iter()
-            .enumerate()
-            .map(|(i, t)| {
-                let x = 20 * i as i32 + padding;
-                (x, t)
-            })
-            .collect();
+        let (offset, text_widgets) =
+            desktops
+                .iter()
+                .cloned()
+                .fold((0, Vec::new()), |(offset, mut text_widgets), t| {
+                    let text_widget = TextWidget::new(
+                        offset as i32 + self.padding,
+                        0,
+                        &t,
+                        self.text_color,
+                        &mut state.text_renderer.font_system,
+                        self.text_metrics,
+                        None,
+                    );
+                    let add = text_widget.size() + self.padding as u32;
 
+                    text_widgets.push(text_widget);
+
+                    (offset + add, text_widgets)
+                });
+
+        self.size = offset;
+
+        self.desktops = text_widgets;
         let reply = connection
             .get_property(
                 false,
@@ -75,9 +110,9 @@ impl Widget for Pager {
             let current_desktop = &self.desktops[current_desktop_index];
 
             let rect = Rect {
-                x: current_desktop.0,
+                x: current_desktop.x(),
                 y: state.height as i32 - 2,
-                width: 20,
+                width: current_desktop.size(),
                 height: 2,
             };
 
@@ -117,9 +152,9 @@ impl Widget for Pager {
                         let current_desktop = &self.desktops[current_desktop_index];
 
                         let rect = Rect {
-                            x: current_desktop.0,
+                            x: current_desktop.x(),
                             y: state.height as i32 - 2,
-                            width: 20,
+                            width: current_desktop.size(),
                             height: 2,
                         };
 
@@ -127,16 +162,6 @@ impl Widget for Pager {
                             Shape::Rect(rect),
                             crate::Color::rgb(0, 0, 0),
                         ));
-
-                        // if let Some(mesh_handle) = self.current_desktop {
-                        //     state.painter.remove_mesh(mesh_handle).unwrap();
-                        // }
-
-                        // self.current_desktop = Some(
-                        //     state
-                        //         .painter
-                        //         .add_shape_absolute(Shape::Rect(rect), crate::Color::rgb(0, 0, 0)),
-                        // );
                     }
                 }
 
@@ -147,46 +172,23 @@ impl Widget for Pager {
         Ok(())
     }
 
-    fn meshes(&self) -> Vec<Mesh> {
-        if let Some(mesh) = self.selector_mesh.clone() {
-            vec![mesh]
-        } else {
-            vec![]
-        }
+    fn meshes(&self) -> Vec<&Mesh> {
+        self.selector_mesh
+            .as_ref()
+            .map(|m| vec![m])
+            .unwrap_or(vec![])
     }
 
-    fn texts(&self, font_system: &mut FontSystem) -> Vec<Text> {
-        self.desktops
-            .iter()
-            .cloned()
-            .map(|(x, t)| {
-                let mut buffer = glyphon::Buffer::new(font_system, self.text_metrics);
-                buffer.set_size(font_system, 1920., 30.);
-                buffer.set_text(
-                    font_system,
-                    &t,
-                    glyphon::Attrs::new(),
-                    glyphon::Shaping::Advanced,
-                );
-                Text {
-                    x,
-                    y: 0,
-                    color: self.text_color,
-                    content: t,
-                    bounds: glyphon::TextBounds {
-                        left: 0,
-                        top: 0,
-                        right: 1920, // TODO: make this dynamic somehow
-                        bottom: 30,  // TODO: make this dynamic somehow
-                    },
-                    buffer,
-                }
-            })
-            .collect()
+    fn texts(&self, _font_system: &mut FontSystem) -> Vec<&Text> {
+        self.desktops.iter().fold(Vec::new(), |mut acc, tw| {
+            acc.extend(tw.texts(_font_system));
+            acc
+        })
     }
 
     fn size(&self) -> u32 {
-        0
+        // self.desktops.iter().map(|t| t.size()).sum::<u32>() + self.padding as u32
+        self.size
     }
 
     fn requires_redraw(&self) -> bool {

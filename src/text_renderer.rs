@@ -18,6 +18,14 @@ pub struct Text {
     pub buffer: glyphon::Buffer,
 }
 
+impl Text {
+    pub fn add_offset(&mut self, offset: i32) {
+        self.x += offset;
+        self.bounds.left += offset;
+        self.bounds.right += offset;
+    }
+}
+
 impl TextRenderer {
     pub fn add_text(&mut self, text: Text) {
         self.texts.push(text);
@@ -37,14 +45,19 @@ impl TextRenderer {
         queue: &wgpu::Queue,
         width: u32,
         height: u32,
-        texts: &[Text],
+        texts: Vec<(&Text, f32)>,
     ) -> Result<(), wgpu::SurfaceError> {
-        let text_areas = texts.iter().map(|t| TextArea {
+        let text_areas = texts.iter().map(|(t, offset)| TextArea {
             buffer: &t.buffer,
-            left: t.x as f32,
+            left: t.x as f32 + offset,
             top: t.y as f32,
             scale: 1.0,
-            bounds: t.bounds,
+            bounds: TextBounds {
+                left: t.bounds.left + offset.ceil() as i32,
+                top: t.bounds.top,
+                right: t.bounds.right + offset.ceil() as i32,
+                bottom: t.bounds.bottom,
+            },
             default_color: t.color,
         });
 

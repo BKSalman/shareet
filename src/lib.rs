@@ -72,6 +72,19 @@ pub struct VertexColored {
     color: [f32; 3],
 }
 
+impl VertexColored {
+    pub fn add_offset_mut(&mut self, offset: f32) {
+        self.position[0] += offset;
+    }
+    pub fn add_offset(&self, offset: f32) -> [f32; 3] {
+        [
+            self.position[0] + offset,
+            self.position[1],
+            self.position[2],
+        ]
+    }
+}
+
 impl Vertex for VertexColored {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
@@ -273,7 +286,11 @@ impl<'a> State<'a> {
         false
     }
 
-    pub fn update(&mut self, meshes: &[Mesh], texts: &[Text]) -> Result<(), wgpu::SurfaceError> {
+    pub fn update(
+        &mut self,
+        meshes: Vec<(&Mesh, f32)>,
+        texts: Vec<(&Text, f32)>,
+    ) -> Result<(), wgpu::SurfaceError> {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -283,11 +300,14 @@ impl<'a> State<'a> {
         self.text_renderer
             .prepare(&self.device, &self.queue, self.width, self.height, texts)?;
 
+        let mut painter_meshes = self.painter.meshes();
+        painter_meshes.extend(meshes);
+
         self.renderer.update_buffers(
             &self.device,
             &self.queue,
             &mut encoder,
-            meshes,
+            painter_meshes,
             self.width,
             self.height,
         );
@@ -295,7 +315,7 @@ impl<'a> State<'a> {
         Ok(())
     }
 
-    pub fn render(&mut self, meshes: &[Mesh]) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self, meshes: Vec<(&Mesh, f32)>) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
 
         let view = output
@@ -327,7 +347,10 @@ impl<'a> State<'a> {
                 depth_stencil_attachment: None,
             });
 
-            self.renderer.render(&mut render_pass, meshes);
+            let mut painter_meshes = self.painter.meshes();
+            painter_meshes.extend(meshes);
+
+            self.renderer.render(&mut render_pass, painter_meshes);
             self.text_renderer.render(&mut render_pass).unwrap();
         }
 
@@ -336,16 +359,20 @@ impl<'a> State<'a> {
 
         self.text_renderer.trim();
 
-        self.text_renderer.texts.clear();
-        self.painter.meshes.clear();
-
         Ok(())
     }
 
-    pub fn add_text_absolute(&mut self, content: &str, x: i32, y: i32, color: glyphon::Color) {
+    pub fn add_text_absolute(
+        &mut self,
+        content: &str,
+        x: i32,
+        y: i32,
+        color: glyphon::Color,
+        font_size: f32,
+    ) {
         let mut text_buffer = glyphon::Buffer::new(
             &mut self.text_renderer.font_system,
-            Metrics::new(self.height as f32, self.height as f32),
+            Metrics::new(font_size, self.height as f32),
         );
 
         let physical_width = self.width as f32 * self.window.display_scale;

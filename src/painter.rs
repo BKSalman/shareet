@@ -12,8 +12,6 @@ pub struct MeshHandle(u64);
 pub struct Painter {
     pub(crate) meshes: IndexMap<MeshHandle, Mesh>,
     next_mesh_id: u64,
-    current_x: u32,
-    current_y: u32,
 }
 
 impl Painter {
@@ -142,8 +140,8 @@ impl Painter {
         }
     }
 
-    pub fn meshes(&self) -> Vec<(&MeshHandle, &Mesh)> {
-        self.meshes.iter().collect()
+    pub fn meshes(&self) -> Vec<(&Mesh, f32)> {
+        self.meshes.values().map(|v| (v, 0.)).collect()
     }
 
     pub fn remove_mesh(&mut self, handle: MeshHandle) -> Option<(MeshHandle, Mesh)> {

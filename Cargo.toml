@@ -5,6 +5,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+profiling = ["dep:dhat", "dep:ctrlc"]
+
 [dependencies]
 x11rb = { version = "0.12.0", features = ["allow-unsafe-code"] }
 raw-window-handle = "0.5.2"
@@ -15,8 +18,14 @@ glam = "0.24.2"
 glyphon = { git = "https://github.com/grovesNL/glyphon" }
 indexmap = "2.0.2"
 # winit = { version = "0.28.7", default-features = false, features = ["x11"] }
+dhat = { version = "0.3.2", optional = true }
+ctrlc = { version = "3.4.1", optional = true }
 
 [dependencies.image]
 version = "0.24"
 default-features = false
 features = ["png", "jpeg"]
+
+# for memory profiling
+[profile.release]
+debug = 1
