@@ -26,7 +26,7 @@ impl TextWidget {
         buffer.set_text(
             font_system,
             content,
-            Attrs::new(),
+            Attrs::new().family(glyphon::Family::Monospace),
             glyphon::Shaping::Advanced,
         );
 
@@ -38,7 +38,7 @@ impl TextWidget {
 
         let height = total_lines as f32 * buffer.metrics().line_height;
 
-        // buffer.set_size(font_system, width, height);
+        buffer.set_size(font_system, width, height);
 
         let background = background_color.map(|b| {
             crate::Painter::create_mesh(

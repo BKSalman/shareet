@@ -19,6 +19,8 @@
             gdb
             renderdoc
             cargo-watch
+            linuxKernel.packages.linux_6_4.perf
+            heaptrack
           ];
           
           nativeBuildInputs = [

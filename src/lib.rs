@@ -386,10 +386,10 @@ impl<'a> State<'a> {
         text_buffer.set_text(
             &mut self.text_renderer.font_system,
             content,
-            Attrs::new().family(Family::SansSerif),
+            Attrs::new().family(glyphon::Family::Monospace),
             Shaping::Advanced,
         );
-        text_buffer.shape_until_scroll(&mut self.text_renderer.font_system);
+        // text_buffer.shape_until_scroll(&mut self.text_renderer.font_system);
 
         self.text_renderer.add_text(Text {
             x,

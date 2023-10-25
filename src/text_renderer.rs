@@ -32,6 +32,16 @@ impl TextRenderer {
     }
     pub fn resize(&mut self, width: f32, height: f32, aspect_ratio: f32) {
         for text in self.texts.iter_mut() {
+            // TODO: should I do this?
+
+            // let (width, total_lines) = text
+            //     .buffer
+            //     .layout_runs()
+            //     .fold((0.0, 0usize), |(width, total_lines), run| {
+            //         (run.line_w.max(width), total_lines + 1)
+            //     });
+            // let height = total_lines as f32 * text.buffer.metrics().line_height;
+
             text.buffer.set_size(
                 &mut self.font_system,
                 width * aspect_ratio,

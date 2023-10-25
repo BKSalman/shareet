@@ -15,6 +15,7 @@ use x11rb::{
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 fn main() {
+    // env_logger::init();
     let _ = pollster::block_on(run());
 }
 
@@ -59,23 +60,12 @@ async fn run() -> Result<(), Error> {
         .change_window_attributes(screen.root, &change)?
         .check()?;
 
-    let pager = Pager::new(
+    bar.widgets.push(Box::new(Pager::new(
         &connection,
         glyphon::Metrics::new(bar.state.height as f32, bar.state.height as f32),
         glyphon::Color::rgb(0, 0, 0),
         5,
-    )?;
-
-    bar.widgets.push(Box::new(pager));
-
-    let pager = Pager::new(
-        &connection,
-        glyphon::Metrics::new(bar.state.height as f32, bar.state.height as f32),
-        glyphon::Color::rgb(0, 0, 0),
-        5,
-    )?;
-
-    bar.widgets.push(Box::new(pager));
+    )?));
 
     for widget in bar.widgets.iter_mut() {
         widget
@@ -145,7 +135,9 @@ async fn run() -> Result<(), Error> {
                     let height = event.height as u32;
                     let configure = ConfigureWindowAux::new().width(width).height(height);
                     connection.configure_window(event.window, &configure)?;
-                    bar.state.resize(width, height);
+                    if bar.state.width != width || bar.state.height != height {
+                        bar.state.resize(width, height);
+                    }
 
                     redraw = true;
                 }
@@ -154,7 +146,9 @@ async fn run() -> Result<(), Error> {
                 Event::ConfigureNotify(event) => {
                     let width = event.width as u32;
                     let height = event.height as u32;
-                    bar.state.resize(width, height);
+                    if bar.state.width != width || bar.state.height != height {
+                        bar.state.resize(width, height);
+                    }
 
                     redraw = true;
                 }
