@@ -212,7 +212,7 @@ impl Widget for Pager {
                     .iter()
                     .enumerate()
                     .map(|(i, tw)| (i, tw.x(), tw.size(state)))
-                    .find(|(_, x, width)| hover(event_x, *x, *width));
+                    .find(|(_, x, width)| hover(event_x, *x, *width, self.padding));
 
                 if let Some((i, _, _)) = hover {
                     self.hovering = Some(i);
@@ -309,6 +309,6 @@ x11rb::atom_manager! {
     }
 }
 
-fn hover(event_x: f32, x: f32, width: f32) -> bool {
-    event_x >= x && event_x <= x + width
+fn hover(event_x: f32, x: f32, width: f32, padding: f32) -> bool {
+    event_x >= x - padding && event_x <= x + width + padding
 }
