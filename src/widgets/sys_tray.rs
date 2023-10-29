@@ -1,9 +1,9 @@
-use mdry::x11rb::Event;
+use mdry::{x11rb::Event, State};
 use x11rb::{
     connection::Connection,
     protocol::xproto::{
-        AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ConnectionExt, CreateWindowAux,
-        EventMask, PropMode, SetMode, Window, WindowClass,
+        AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ConfigureWindowAux, ConnectionExt,
+        CreateWindowAux, EventMask, PropMode, SetMode, Window, WindowClass,
     },
     wrapper::ConnectionExt as _,
     xcb_ffi::XCBConnection,
@@ -37,18 +37,30 @@ const SYSTEM_TRAY_CANCEL_MESSAGE: u32 = 2;
 // #define XEMBED_UNREGISTER_ACCELERATOR   13
 // #define XEMBED_ACTIVATE_ACCELERATOR     14
 const XEMBED_EMBEDDED_NOTIFY: u32 = 0;
+#[allow(unused)]
 const XEMBED_WINDOW_ACTIVATE: u32 = 1;
+#[allow(unused)]
 const XEMBED_WINDOW_DEACTIVATE: u32 = 2;
+#[allow(unused)]
 const XEMBED_REQUEST_FOCUS: u32 = 3;
+#[allow(unused)]
 const XEMBED_FOCUS_IN: u32 = 4;
+#[allow(unused)]
 const XEMBED_FOCUS_OUT: u32 = 5;
+#[allow(unused)]
 const XEMBED_FOCUS_NEXT: u32 = 6;
+#[allow(unused)]
 const XEMBED_FOCUS_PREV: u32 = 7;
 /* 8-9 were used for XEMBED_GRAB_KEY/XEMBED_UNGRAB_KEY */
+#[allow(unused)]
 const XEMBED_MODALITY_ON: u32 = 10;
+#[allow(unused)]
 const XEMBED_MODALITY_OFF: u32 = 11;
+#[allow(unused)]
 const XEMBED_REGISTER_ACCELERATOR: u32 = 12;
+#[allow(unused)]
 const XEMBED_UNREGISTER_ACCELERATOR: u32 = 13;
+#[allow(unused)]
 const XEMBED_ACTIVATE_ACCELERATOR: u32 = 14;
 
 const XEMBED_VERSION: u32 = 0;
@@ -63,9 +75,10 @@ const XEMBED_MAPPED: u32 = 1 << 0;
 pub struct SysTray {
     selection_owner: Window,
     tray_icons: Vec<TrayIcon>,
-    width: u32,
     x: u32,
     _net_system_tray_s: u32,
+    icons_size: u32,
+    padding: u32,
 }
 
 struct TrayIcon {
@@ -81,6 +94,8 @@ impl SysTray {
         screen_num: usize,
         bar_width: u32,
         bar_height: u32,
+        icons_size: u32,
+        padding: u32,
     ) -> Result<Self, Error> {
         let create = CreateWindowAux::new();
         let win_id = connection.generate_id()?;
@@ -110,13 +125,133 @@ impl SysTray {
         Ok(Self {
             selection_owner: win_id,
             tray_icons: Vec::new(),
-            width: 1,
             x: bar_width - 1,
             _net_system_tray_s,
+            icons_size,
+            padding,
         })
     }
 
-    fn embed_client(&self) {}
+    fn embed_client(
+        &mut self,
+        connection: &XCBConnection,
+        message_data: [u32; 5],
+        state: &State,
+    ) -> Result<(), Error> {
+        // begin embedding life cycle in XEMBED specification
+        // https://specifications.freedesktop.org/xembed-spec/xembed-spec-latest.html#lifecycle
+        let message = message_data[1];
+        if message == SYSTEM_TRAY_REQUEST_DOCK {
+            let embedded_window = message_data[2];
+            if self
+                .tray_icons
+                .iter()
+                .find(|ti| ti.embedded_window == embedded_window)
+                .is_some()
+            {
+                eprintln!("Tray client {embedded_window} is already embedded, ignoring request...");
+                return Ok(());
+            }
+
+            let configure = ConfigureWindowAux::new().width(20).height(20);
+
+            connection
+                .configure_window(embedded_window, &configure)?
+                .check()?;
+
+            // create a wrapper window to match the depth, visual to be able to reparent it
+            // and also match the  geometry of the embedded window
+            let wrapper_window = connection.generate_id()?;
+
+            let create = CreateWindowAux::new();
+
+            let x = (state.width
+                - ((self.icons_size + self.padding) * self.tray_icons.len() as u32) as u32)
+                as i16;
+
+            let y = ((state.height / 2) - self.icons_size / 2) as i16;
+
+            connection
+                .create_window(
+                    COPY_DEPTH_FROM_PARENT,
+                    wrapper_window,
+                    state.window.xid,
+                    x,
+                    y,
+                    20,
+                    20,
+                    0,
+                    WindowClass::INPUT_OUTPUT,
+                    COPY_FROM_PARENT,
+                    &create,
+                )?
+                .check()?;
+
+            connection
+                .change_save_set(SetMode::INSERT, embedded_window)?
+                .check()?;
+
+            connection
+                .reparent_window(embedded_window, wrapper_window, 0, 0)?
+                .check()?;
+
+            self.tray_icons.push(TrayIcon {
+                embedded_window,
+                wrapper_window,
+            });
+
+            // get version from client/embedded window in the _XEMBED_INFO property
+            let xembed_info = connection
+                .get_property(
+                    false,
+                    embedded_window,
+                    state.window.atoms._XEMBED_INFO,
+                    state.window.atoms._XEMBED_INFO,
+                    0,
+                    2,
+                )?
+                .reply()?;
+
+            // xembed_info[0]: version
+            // xembed_info[1]: flags (currently only has XEMBED_MAPPED flag)
+            let xembed_info = xembed_info
+                .value32()
+                .ok_or("Failed to get XEMBED_INFO")?
+                .collect::<Vec<_>>();
+
+            // send the embedder(wrapper) window id in a XEMBED_EMBEDDED_NOTIFY message
+            // with the minimum supported xembed version (currently it's always 0)
+            let send_event = ClientMessageEvent::new(
+                32,
+                embedded_window,
+                state.window.atoms._XEMBED,
+                [
+                    CURRENT_TIME,           // x_time
+                    XEMBED_EMBEDDED_NOTIFY, // message
+                    0,                      // detail (idk what's this)
+                    wrapper_window,         // data1
+                    XEMBED_VERSION,         // data2
+                ],
+            );
+
+            connection
+                .send_event(false, embedded_window, EventMask::NO_EVENT, send_event)?
+                .check()?;
+
+            let mapped = xembed_info[1];
+
+            if mapped == XEMBED_MAPPED {
+                connection.map_window(wrapper_window)?.check()?;
+                connection.map_window(embedded_window)?.check()?;
+            }
+        } else if message == SYSTEM_TRAY_BEGIN_MESSAGE {
+            println!("got SYSTEM_TRAY_BEGIN_MESSAGE");
+        } else if message == SYSTEM_TRAY_CANCEL_MESSAGE {
+            println!("got SYSTEM_TRAY_CANCEL_MESSAGE");
+        }
+
+        Ok(())
+    }
 }
 
 impl Widget for SysTray {
@@ -235,121 +370,16 @@ impl Widget for SysTray {
         match event {
             Event::ClientMessage(event) => {
                 if event.type_ == state.window.atoms._NET_SYSTEM_TRAY_OPCODE {
-                    // begin embedding life cycle in XEMBED specification
-                    // https://specifications.freedesktop.org/xembed-spec/xembed-spec-latest.html#lifecycle
-                    let message = event.data.as_data32()[1];
-                    if message == SYSTEM_TRAY_REQUEST_DOCK {
-                        let embedded_window = event.data.as_data32()[2];
-                        if self
-                            .tray_icons
-                            .iter()
-                            .find(|ti| ti.embedded_window == embedded_window)
-                            .is_some()
-                        {
-                            eprintln!("Tray client {embedded_window} is already embedded, ignoring request...");
-                            return Ok(());
-                        }
-                        // create a wrapper window to match the depth, visual to be able to reparent it
-                        // and also match the  geometry of the embedded window
-                        let wrapper_window = connection.generate_id()?;
-
-                        let geom = connection.get_geometry(embedded_window)?.reply()?;
-
-                        let create = CreateWindowAux::new();
-
-                        connection
-                            .create_window(
-                                geom.depth,
-                                wrapper_window,
-                                state.window.xid,
-                                (state.width - (50 * self.tray_icons.len()) as u32) as i16,
-                                0,
-                                geom.width,
-                                geom.height,
-                                0,
-                                WindowClass::INPUT_OUTPUT,
-                                COPY_FROM_PARENT,
-                                &create,
-                            )?
-                            .check()?;
-
-                        connection
-                            .change_save_set(SetMode::INSERT, embedded_window)?
-                            .check()?;
-
-                        connection
-                            .reparent_window(embedded_window, wrapper_window, 0, 0)?
-                            .check()?;
-
-                        self.tray_icons.push(TrayIcon {
-                            embedded_window,
-                            wrapper_window,
-                        });
-
-                        // get version from client/embedded window in the _XEMBED_INFO property
-                        let xembed_info = connection
-                            .get_property(
-                                false,
-                                embedded_window,
-                                state.window.atoms._XEMBED_INFO,
-                                state.window.atoms._XEMBED_INFO,
-                                0,
-                                2,
-                            )?
-                            .reply()?;
-
-                        // xembed_info[0]: version
-                        // xembed_info[1]: flags (currently only has XEMBED_MAPPED flag)
-                        let xembed_info = xembed_info
-                            .value32()
-                            .ok_or("Failed to get XEMBED_INFO")?
-                            .collect::<Vec<_>>();
-
-                        // send the embedder(wrapper) window id in a XEMBED_EMBEDDED_NOTIFY message
-                        // with the minimum supported xembed version (currently it's always 0)
-                        let send_event = ClientMessageEvent::new(
-                            32,
-                            embedded_window,
-                            state.window.atoms._XEMBED,
-                            [
-                                CURRENT_TIME,           // x_time
-                                XEMBED_EMBEDDED_NOTIFY, // message
-                                0,                      // detail (idk what's this)
-                                wrapper_window,         // data1
-                                XEMBED_VERSION,         // data2
-                            ],
-                        );
-
-                        connection
-                            .send_event(false, embedded_window, EventMask::NO_EVENT, send_event)?
-                            .check()?;
-
-                        let mapped = xembed_info[1];
-
-                        if mapped == XEMBED_MAPPED {
-                            connection.map_window(wrapper_window)?.check()?;
-                            connection.map_window(embedded_window)?.check()?;
-                        }
-                    } else if message == SYSTEM_TRAY_BEGIN_MESSAGE {
-                    } else if message == SYSTEM_TRAY_CANCEL_MESSAGE {
-                    }
+                    let message_data = event.data.as_data32();
+                    self.embed_client(connection, message_data, &state)?;
                 }
+
                 if event.type_ == self._net_system_tray_s {
                     println!("systray event");
                 }
             }
             Event::Expose(event) => {
                 if event.window == self.selection_owner {
-                    println!("{event:#?}");
-                }
-            }
-            Event::SelectionNotify(event) => {
-                if event.selection == self._net_system_tray_s {
-                    println!("{event:#?}");
-                }
-            }
-            Event::SelectionRequest(event) => {
-                if event.selection == self._net_system_tray_s {
                     println!("{event:#?}");
                 }
             }

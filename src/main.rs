@@ -73,6 +73,8 @@ fn main() -> Result<(), Error> {
         screen_num,
         bar.state.width,
         bar.state.height,
+        20,
+        5,
     )?));
 
     for widget in bar.widgets.iter_mut() {
