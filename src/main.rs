@@ -1,6 +1,11 @@
 use std::sync::Arc;
 
-use shareet::{create_window, widgets::pager::Pager, Bar, Error};
+use mdry::{color::Color, window::Window};
+use shareet::{
+    create_window,
+    widgets::{pager::Pager, sys_tray::SysTray},
+    Bar, Error,
+};
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -14,12 +19,7 @@ use x11rb::{
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-fn main() {
-    // env_logger::init();
-    let _ = pollster::block_on(run());
-}
-
-async fn run() -> Result<(), Error> {
+fn main() -> Result<(), Error> {
     #[cfg(feature = "profiling")]
     let profiler = dhat::Profiler::new_heap();
     #[cfg(feature = "profiling")]
@@ -39,16 +39,16 @@ async fn run() -> Result<(), Error> {
     let screen = &connection.setup().roots[screen_num];
 
     let width = screen.width_in_pixels;
-    let height = 30;
+    let height = 35;
 
     // let width = 100;
     // let height = 100;
 
     let display_scale = 1.;
 
-    let window = create_window(&connection, width, height, screen_num, display_scale)?;
+    let window = create_window(&connection, width, height, screen_num, display_scale, false)?;
 
-    let mut bar = Bar::new(window, screen).await;
+    let mut bar = pollster::block_on(run(window));
 
     let mut redraw = true;
 
@@ -63,8 +63,16 @@ async fn run() -> Result<(), Error> {
     bar.widgets.push(Box::new(Pager::new(
         &connection,
         glyphon::Metrics::new(bar.state.height as f32, bar.state.height as f32),
-        glyphon::Color::rgb(0, 0, 0),
-        5,
+        Color::rgb(191, 189, 182),
+        Color::rgb(233, 86, 120),
+        5.,
+    )?));
+
+    bar.widgets.push(Box::new(SysTray::new(
+        &connection,
+        screen_num,
+        bar.state.width,
+        bar.state.height,
     )?));
 
     for widget in bar.widgets.iter_mut() {
@@ -83,22 +91,14 @@ async fn run() -> Result<(), Error> {
             Err(_) => {}
         }
         if redraw {
-            let (meshes, texts, _) = bar.widgets.iter().fold(
-                (Vec::new(), Vec::new(), 0.),
-                |(mut meshes, mut texts, offset), w| {
-                    meshes.extend(w.meshes().into_iter().map(|m| (m, offset)));
-                    texts.extend(
-                        w.texts(&mut bar.state.text_renderer.font_system)
-                            .into_iter()
-                            .map(|t| (t, offset)),
-                    );
-                    let size = w.size();
-                    return (meshes, texts, offset + size as f32);
-                },
-            );
-
-            bar.state.update(meshes.clone(), texts)?;
-            match bar.state.render(meshes) {
+            bar.state.clear_background(Color::rgb(26, 29, 36));
+            let mut offset = 0.;
+            for widget in bar.widgets.iter_mut() {
+                widget.draw(&connection, screen_num, &mut bar.state, offset)?;
+                offset += widget.size(&mut bar.state);
+            }
+            bar.state.update()?;
+            match bar.state.render() {
                 Ok(_) => {}
                 // Reconfigure the surface if lost
                 Err(wgpu::SurfaceError::Lost) => {
@@ -124,8 +124,6 @@ async fn run() -> Result<(), Error> {
                     if event.data.as_data32()[0] == bar.state.window.atoms.WM_DELETE_WINDOW {
                         return Ok(());
                     }
-
-                    // println!("client message: {event:#?}");
                 }
                 Event::PropertyNotify(event) if event.window == screen.root => {
                     redraw = true;
@@ -156,7 +154,9 @@ async fn run() -> Result<(), Error> {
             }
 
             for widget in bar.widgets.iter_mut() {
-                if let Err(e) = widget.on_event(&connection, &mut bar.state, event.clone()) {
+                if let Err(e) =
+                    widget.on_event(&connection, screen_num, &mut bar.state, event.clone())
+                {
                     eprintln!("widget error: {e}");
                 }
             }
@@ -164,4 +164,8 @@ async fn run() -> Result<(), Error> {
             event_option = connection.poll_for_event()?;
         }
     }
+}
+
+async fn run<'a>(window: Window<'a>) -> Bar<'a> {
+    Bar::new(window).await
 }

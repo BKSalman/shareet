@@ -1,9 +1,9 @@
-use glyphon::FontSystem;
 use x11rb::xcb_ffi::XCBConnection;
 
-use crate::{shapes::Mesh, text_renderer::Text, State};
+use mdry::State;
 
 pub mod pager;
+pub mod sys_tray;
 pub mod text;
 
 pub trait Widget {
@@ -16,19 +16,23 @@ pub trait Widget {
     fn on_event(
         &mut self,
         connection: &XCBConnection,
+        screen_num: usize,
         state: &mut State,
         event: x11rb::protocol::Event,
     ) -> Result<(), crate::Error>;
 
-    fn meshes(&self) -> Vec<&Mesh> {
-        vec![]
+    fn draw(
+        &mut self,
+        connection: &XCBConnection,
+        screen_num: usize,
+        state: &mut State,
+        offset: f32,
+    ) -> Result<(), crate::Error>;
+
+    fn size(&self, state: &mut State) -> f32 {
+        0.
     }
-    fn texts(&self, _font_system: &mut FontSystem) -> Vec<&Text> {
-        vec![]
-    }
-    fn size(&self) -> u32 {
-        0
-    }
+
     fn requires_redraw(&self) -> bool {
         true
     }

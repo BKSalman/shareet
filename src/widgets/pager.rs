@@ -1,4 +1,3 @@
-use glyphon::FontSystem;
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -8,41 +7,41 @@ use x11rb::{
     xcb_ffi::XCBConnection,
 };
 
-use crate::{
-    shapes::{Mesh, Rect, Shape},
-    text_renderer::Text,
-    State,
-};
+use crate::State;
+use mdry::{color::Color, shapes::Rect};
 
 use super::{text::TextWidget, Widget};
 
 pub struct Pager {
     text_metrics: glyphon::Metrics,
-    text_color: glyphon::Color,
-    selector_mesh: Option<Mesh>,
+    text_color: Color,
+    current_desktop: Option<usize>,
     desktops: Vec<TextWidget>,
     atoms: PagerAtoms,
     requires_redraw: bool,
-    padding: i32,
-    size: u32,
+    padding: f32,
+    width: f32,
+    selector_color: Color,
 }
 
 impl Pager {
     pub fn new(
         connection: &XCBConnection,
         text_metrics: glyphon::Metrics,
-        text_color: glyphon::Color,
-        padding: i32,
+        text_color: Color,
+        selector_color: Color,
+        padding: f32,
     ) -> Result<Self, crate::Error> {
         Ok(Self {
             text_metrics,
             text_color,
-            selector_mesh: None,
             atoms: PagerAtoms::new(connection)?.reply()?,
             requires_redraw: true,
             desktops: Vec::new(),
             padding,
-            size: 0,
+            width: 0.,
+            current_desktop: None,
+            selector_color,
         })
     }
 }
@@ -71,31 +70,32 @@ impl Widget for Pager {
         let (offset, text_widgets) =
             desktops
                 .iter()
-                .cloned()
-                .fold((0, Vec::new()), |(offset, mut text_widgets), t| {
-                    let text_widget = TextWidget::new(
-                        offset as i32 + self.padding,
-                        0,
-                        &t,
+                .fold((0., Vec::new()), |(offset, mut text_widgets), t| {
+                    let mut text_widget = TextWidget::new(
+                        offset + self.padding,
+                        0.,
+                        t,
                         self.text_color,
-                        &mut state.text_renderer.font_system,
-                        self.text_metrics,
+                        self.text_metrics.font_size,
                         None,
                     );
-                    let add = text_widget.size() + self.padding as u32;
+
+                    text_widget.setup(state, connection, screen_num).unwrap();
+
+                    let offset = offset + text_widget.size(state) + self.padding;
 
                     text_widgets.push(text_widget);
 
-                    (offset + add, text_widgets)
+                    (offset, text_widgets)
                 });
 
-        self.size = offset;
+        self.width = offset;
 
         self.desktops = text_widgets;
         let reply = connection
             .get_property(
                 false,
-                state.screen.root,
+                screen.root,
                 self.atoms._NET_CURRENT_DESKTOP,
                 AtomEnum::CARDINAL,
                 0,
@@ -107,19 +107,8 @@ impl Widget for Pager {
 
         if let Some(mut value) = value32 {
             let current_desktop_index = value.next().unwrap() as usize;
-            let current_desktop = &self.desktops[current_desktop_index];
 
-            let rect = Rect {
-                x: current_desktop.x(),
-                y: state.height as i32 - 2,
-                width: current_desktop.size(),
-                height: 2,
-            };
-
-            self.selector_mesh = Some(crate::painter::Painter::create_mesh(
-                Shape::Rect(rect),
-                crate::Color::rgb(0, 0, 0),
-            ));
+            self.current_desktop = Some(current_desktop_index);
         }
 
         Ok(())
@@ -128,16 +117,18 @@ impl Widget for Pager {
     fn on_event(
         &mut self,
         connection: &XCBConnection,
-        state: &mut State,
+        screen_num: usize,
+        _state: &mut State,
         event: Event,
     ) -> Result<(), crate::Error> {
+        let screen = &connection.setup().roots[screen_num];
         match event {
-            Event::PropertyNotify(event) if event.window == state.screen.root => {
+            Event::PropertyNotify(event) if event.window == screen.root => {
                 if event.atom == self.atoms._NET_CURRENT_DESKTOP {
                     let reply = connection
                         .get_property(
                             false,
-                            state.screen.root,
+                            screen.root,
                             self.atoms._NET_CURRENT_DESKTOP,
                             AtomEnum::CARDINAL,
                             0,
@@ -149,19 +140,14 @@ impl Widget for Pager {
 
                     if let Some(mut value) = value32 {
                         let current_desktop_index = value.next().unwrap() as usize;
-                        let current_desktop = &self.desktops[current_desktop_index];
 
-                        let rect = Rect {
-                            x: current_desktop.x(),
-                            y: state.height as i32 - 2,
-                            width: current_desktop.size(),
-                            height: 2,
-                        };
-
-                        self.selector_mesh = Some(crate::painter::Painter::create_mesh(
-                            Shape::Rect(rect),
-                            crate::Color::rgb(0, 0, 0),
-                        ));
+                        if current_desktop_index > self.desktops.len() - 1 {
+                            eprintln!(
+                                "tried to switch to an out of bound desktop in pager: {current_desktop_index}"
+                            );
+                            return Ok(());
+                        }
+                        self.current_desktop = Some(current_desktop_index);
                     }
                 }
 
@@ -172,23 +158,40 @@ impl Widget for Pager {
         Ok(())
     }
 
-    fn meshes(&self) -> Vec<&Mesh> {
-        self.selector_mesh
-            .as_ref()
-            .map(|m| vec![m])
-            .unwrap_or(vec![])
+    fn draw(
+        &mut self,
+        connection: &XCBConnection,
+        screen_num: usize,
+        state: &mut State,
+        offset: f32,
+    ) -> Result<(), crate::Error> {
+        for desktop in self.desktops.iter_mut() {
+            desktop.draw(connection, screen_num, state, offset)?;
+        }
+
+        if let Some(current_desktop_index) = self.current_desktop {
+            let current_desktop = &self.desktops[current_desktop_index];
+
+            let rect = Rect {
+                x: current_desktop.x() + offset,
+                y: state.height as f32 - 2.,
+                width: current_desktop.size(state) as u32,
+                height: 2,
+                color: self.selector_color,
+            };
+
+            state.draw_shape_absolute(mdry::shapes::Shape::Rect(rect));
+        }
+
+        Ok(())
     }
 
-    fn texts(&self, _font_system: &mut FontSystem) -> Vec<&Text> {
-        self.desktops.iter().fold(Vec::new(), |mut acc, tw| {
-            acc.extend(tw.texts(_font_system));
-            acc
-        })
-    }
-
-    fn size(&self) -> u32 {
-        // self.desktops.iter().map(|t| t.size()).sum::<u32>() + self.padding as u32
-        self.size
+    fn size(&self, state: &mut State) -> f32 {
+        self.desktops
+            .iter()
+            .map(|t| t.size(state) + self.padding)
+            .sum::<f32>()
+            + self.padding
     }
 
     fn requires_redraw(&self) -> bool {
