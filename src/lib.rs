@@ -20,10 +20,6 @@ use x11rb::{
 };
 use x11rb::{COPY_DEPTH_FROM_PARENT, COPY_FROM_PARENT};
 
-mod painter;
-mod renderer;
-pub mod shapes;
-pub mod text_renderer;
 pub mod widgets;
 
 pub type Error = Box<dyn std::error::Error>;
