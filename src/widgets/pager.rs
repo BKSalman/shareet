@@ -1,16 +1,29 @@
 use x11rb::{
     connection::Connection,
     protocol::{
-        xproto::{AtomEnum, ConnectionExt},
+        xproto::{
+            AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ConnectionExt, Cursor,
+            EventMask,
+        },
         Event,
     },
     xcb_ffi::XCBConnection,
+    CURRENT_TIME,
 };
 
 use crate::State;
 use mdry::{color::Color, shapes::Rect};
 
 use super::{text::TextWidget, Widget};
+
+const HAND_CURSOR: u16 = 60;
+const LEFTPTR_CURSOR: u16 = 68;
+
+const LEFT_BTN: u8 = 1;
+const RIGHT_BTN: u8 = 2;
+const MIDDLE_BTN: u8 = 3;
+const SCROLL_UP: u8 = 4;
+const SCROLL_DOWN: u8 = 5;
 
 pub struct Pager {
     text_metrics: glyphon::Metrics,
@@ -22,6 +35,9 @@ pub struct Pager {
     padding: f32,
     width: f32,
     selector_color: Color,
+    normal_cursor: Cursor,
+    hand_cursor: Cursor,
+    hovering: Option<usize>,
 }
 
 impl Pager {
@@ -32,6 +48,39 @@ impl Pager {
         selector_color: Color,
         padding: f32,
     ) -> Result<Self, crate::Error> {
+        let font = connection.generate_id()?;
+        connection.open_font(font, b"cursor")?;
+
+        let hand_cursor = connection.generate_id()?;
+        connection.create_glyph_cursor(
+            hand_cursor,
+            font,
+            font,
+            HAND_CURSOR,
+            HAND_CURSOR + 1,
+            0,
+            0,
+            0,
+            u16::MAX,
+            u16::MAX,
+            u16::MAX,
+        )?;
+
+        let normal_cursor = connection.generate_id()?;
+        connection.create_glyph_cursor(
+            normal_cursor,
+            font,
+            font,
+            LEFTPTR_CURSOR,
+            LEFTPTR_CURSOR + 1,
+            0,
+            0,
+            0,
+            u16::MAX,
+            u16::MAX,
+            u16::MAX,
+        )?;
+
         Ok(Self {
             text_metrics,
             text_color,
@@ -42,6 +91,9 @@ impl Pager {
             width: 0.,
             current_desktop: None,
             selector_color,
+            hand_cursor,
+            normal_cursor,
+            hovering: None,
         })
     }
 }
@@ -118,7 +170,7 @@ impl Widget for Pager {
         &mut self,
         connection: &XCBConnection,
         screen_num: usize,
-        _state: &mut State,
+        state: &mut State,
         event: Event,
     ) -> Result<(), crate::Error> {
         let screen = &connection.setup().roots[screen_num];
@@ -152,6 +204,47 @@ impl Widget for Pager {
                 }
 
                 self.requires_redraw = true;
+            }
+            Event::MotionNotify(event) => {
+                let event_x = event.event_x as f32;
+                let hover = self
+                    .desktops
+                    .iter()
+                    .enumerate()
+                    .map(|(i, tw)| (i, tw.x(), tw.size(state)))
+                    .find(|(_, x, width)| hover(event_x, *x, *width));
+
+                if let Some((i, _, _)) = hover {
+                    self.hovering = Some(i);
+                    let change = ChangeWindowAttributesAux::new().cursor(self.hand_cursor);
+
+                    connection
+                        .change_window_attributes(state.window.xid, &change)?
+                        .check()?;
+                } else {
+                    self.hovering = None;
+                    let change = ChangeWindowAttributesAux::new().cursor(self.normal_cursor);
+
+                    connection
+                        .change_window_attributes(state.window.xid, &change)?
+                        .check()?;
+                }
+            }
+            Event::ButtonPress(event) => {
+                if event.detail == LEFT_BTN {
+                    if let Some(hovering) = self.hovering {
+                        let message = ClientMessageEvent::new(
+                            32,
+                            screen.root,
+                            state.window.atoms._NET_CURRENT_DESKTOP,
+                            [hovering as u32, CURRENT_TIME, 0, 0, 0],
+                        );
+
+                        connection
+                            .send_event(false, screen.root, EventMask::from(0xFFFFFFu32), message)?
+                            .check()?;
+                    }
+                }
             }
             _ => {}
         }
@@ -214,4 +307,8 @@ x11rb::atom_manager! {
         _NET_WM_NAME,
         WM_NAME,
     }
+}
+
+fn hover(event_x: f32, x: f32, width: f32) -> bool {
+    event_x >= x && event_x <= x + width
 }
