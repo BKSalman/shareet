@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Color {
     r: u8,
     g: u8,
@@ -7,6 +7,31 @@ pub struct Color {
 }
 
 impl Color {
+    pub fn hex(hex: &str) -> Option<Self> {
+        if let Some(hex) = hex.strip_prefix("#") {
+            if hex.len() != 6 {
+                return None;
+            }
+
+            if hex.chars().any(|c| !c.is_ascii_hexdigit()) {
+                return None;
+            }
+
+            let hex: Vec<_> = (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                .collect();
+
+            return Some(Self {
+                r: hex[0],
+                g: hex[1],
+                b: hex[2],
+                a: 255,
+            });
+        }
+
+        None
+    }
     pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
     }

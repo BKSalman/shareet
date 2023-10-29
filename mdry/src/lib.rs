@@ -70,6 +70,8 @@ pub struct State<'a> {
     clear_background: Option<crate::color::Color>,
     texts: Vec<Text>,
     meshes: Vec<Mesh>,
+    /// kind of a stupid way to measure the text size
+    measure_text_buffer: glyphon::Buffer,
 }
 
 impl<'a> State<'a> {
@@ -120,12 +122,7 @@ impl<'a> State<'a> {
         // Shader code in this tutorial assumes an sRGB surface texture. Using a different
         // one will result all the colors coming out darker. If you want to support non
         // sRGB surfaces, you'll need to account for that when drawing to the frame.
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(surface_caps.formats[0]);
+        let surface_format = preferred_framebuffer_format(&surface_caps.formats).unwrap();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -139,11 +136,15 @@ impl<'a> State<'a> {
 
         let renderer = Renderer::new(config.format, &device).await;
 
-        let font_system = FontSystem::new();
+        let mut font_system = FontSystem::new();
         let text_cache = SwashCache::new();
         let mut atlas = TextAtlas::new(&device, &queue, surface_format);
         let text_renderer =
             glyphon::TextRenderer::new(&mut atlas, &device, MultisampleState::default(), None);
+
+        let mut measure_text_buffer = glyphon::Buffer::new(&mut font_system, Metrics::new(1., 1.));
+
+        measure_text_buffer.set_size(&mut font_system, width as f32, height as f32);
 
         let text_renderer = TextRenderer {
             renderer: text_renderer,
@@ -165,6 +166,7 @@ impl<'a> State<'a> {
             clear_background: None,
             texts: Vec::new(),
             meshes: Vec::new(),
+            measure_text_buffer,
         }
     }
 
@@ -474,14 +476,14 @@ impl<'a> State<'a> {
         }
     }
 
-    pub fn draw_text(
+    pub fn draw_text_absolute(
         &mut self,
         content: &str,
         x: f32,
         y: f32,
         color: crate::color::Color,
         font_size: f32,
-    ) {
+    ) -> &glyphon::Buffer {
         let mut text_buffer = glyphon::Buffer::new(
             &mut self.text_renderer.font_system,
             Metrics::new(font_size, font_size),
@@ -519,7 +521,27 @@ impl<'a> State<'a> {
                 bottom: (height + y).ceil() as i32,
             },
             buffer: text_buffer,
-        })
+        });
+
+        &self.texts[self.texts.len() - 1].buffer
+    }
+
+    pub fn measure_text(&mut self, text: &str, metrics: Metrics) -> (f32, f32) {
+        self.measure_text_buffer
+            .set_metrics(&mut self.text_renderer.font_system, metrics);
+
+        self.measure_text_buffer.set_text(
+            &mut self.text_renderer.font_system,
+            text,
+            Attrs::new().family(glyphon::Family::Monospace),
+            Shaping::Advanced,
+        );
+
+        measure_text(&self.measure_text_buffer)
+    }
+
+    pub fn font_system_mut(&mut self) -> &mut FontSystem {
+        &mut self.text_renderer.font_system
     }
 }
 
@@ -555,4 +577,42 @@ fn create_circle_vertices(
     }
 
     (vertices, indices)
+}
+
+// stolen from egui
+/// Find the framebuffer format that mdry prefers
+///
+/// # Errors
+/// Returns [`WgpuError::NoSurfaceFormatsAvailable`] if the given list of formats is empty.
+pub fn preferred_framebuffer_format(
+    formats: &[wgpu::TextureFormat],
+) -> Result<wgpu::TextureFormat, WgpuError> {
+    for &format in formats {
+        if matches!(
+            format,
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm
+        ) {
+            return Ok(format);
+        }
+    }
+
+    formats
+        .get(0)
+        .copied()
+        .ok_or(WgpuError::NoSurfaceFormatsAvailable)
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum WgpuError {
+    #[error("Failed to create wgpu adapter, no suitable adapter found.")]
+    NoSuitableAdapterFound,
+
+    #[error("There was no valid format for the surface at all.")]
+    NoSurfaceFormatsAvailable,
+
+    #[error(transparent)]
+    RequestDeviceError(#[from] wgpu::RequestDeviceError),
+
+    #[error(transparent)]
+    CreateSurfaceError(#[from] wgpu::CreateSurfaceError),
 }

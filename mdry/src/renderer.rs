@@ -1,3 +1,4 @@
+use glyphon::{Resolution, SwashCache, TextArea, TextBounds};
 use wgpu::util::DeviceExt;
 
 use crate::shapes::Mesh;
@@ -22,6 +23,7 @@ pub struct Renderer {
     uniform_buffer: wgpu::Buffer,
     scale_factor: f32,
     uniform_bind_group: wgpu::BindGroup,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 /// Uniform buffer used when rendering.
@@ -77,6 +79,29 @@ impl Renderer {
                 }),
             }],
         });
+
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Texture Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -159,6 +184,7 @@ impl Renderer {
                 .unwrap_or(1.0),
             uniform_buffer,
             uniform_bind_group,
+            texture_bind_group_layout,
         }
     }
 
@@ -197,7 +223,7 @@ impl Renderer {
                     .slice(vertex_buffer_slice.start as u64..vertex_buffer_slice.end as u64),
             );
 
-            let len = (index_buffer_slice.end / std::mem::size_of::<u32>()) - 1;
+            let len = (index_buffer_slice.len() / std::mem::size_of::<u32>()) - 1;
 
             render_pass.draw_indexed(0..len as u32 + 1, 0, 0..1);
         }
@@ -301,8 +327,6 @@ impl Renderer {
         }
     }
 }
-
-use glyphon::{Resolution, SwashCache, TextArea, TextBounds};
 
 pub struct TextRenderer {
     pub(crate) renderer: glyphon::TextRenderer,

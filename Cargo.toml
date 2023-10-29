@@ -5,10 +5,17 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[workspace]
+members = [
+  "mdry",
+  "mdry/examples/*"
+]
+
 [features]
 profiling = ["dep:dhat", "dep:ctrlc"]
 
 [dependencies]
+mdry = { path = "./mdry" }
 x11rb = { version = "0.12.0", features = ["allow-unsafe-code"] }
 raw-window-handle = "0.5.2"
 wgpu = { version = "0.17.1", features = ["vulkan-portability"]}
@@ -20,12 +27,13 @@ indexmap = "2.0.2"
 dhat = { version = "0.3.2", optional = true }
 ctrlc = { version = "3.4.1", optional = true }
 env_logger = "0.10.0"
+thiserror = "1.0.50"
 
 [dependencies.image]
 version = "0.24"
 default-features = false
 features = ["png", "jpeg"]
 
-# for memory profiling
+# for profiling
 [profile.release]
 debug = 1

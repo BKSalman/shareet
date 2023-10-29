@@ -23,10 +23,19 @@ pub struct Window<'a> {
     pub xid: xproto::Window,
     pub connection: &'a XCBConnection,
     pub screen_num: usize,
+    pub x: i32,
+    pub y: i32,
     pub width: u32,
     pub height: u32,
     pub atoms: Atoms,
     pub display_scale: f32,
+    pub window_type: WindowType,
+}
+
+#[derive(Debug)]
+pub enum WindowType {
+    Normal,
+    Dock { bottom: bool, struts: [u32; 12] },
 }
 
 x11rb::atom_manager! {
@@ -66,6 +75,17 @@ x11rb::atom_manager! {
         _NET_WM_STRUT,
         _NET_FRAME_EXTENTS,
         _NET_WM_STRUT_PARTIAL,
+
+        MANAGER,
+
+        _NET_SYSTEM_TRAY_OPCODE,
+        _NET_SYSTEM_TRAY_COLORS,
+        _NET_SYSTEM_TRAY_ORIENTATION,
+        _NET_SYSTEM_TRAY_ORIENTATION_HORZ,
+        _NET_SYSTEM_TRAY_S,
+
+        _XEMBED,
+        _XEMBED_INFO,
 
         _NET_WM_NAME,
         WM_NAME,

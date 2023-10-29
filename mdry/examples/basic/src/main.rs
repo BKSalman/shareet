@@ -3,7 +3,7 @@ use std::sync::Arc;
 use mdry::{
     color::Color,
     shapes::{Rect, Shape},
-    window::{Atoms, Window},
+    window::{Atoms, Window, WindowType},
     x11rb::{
         self,
         connection::Connection,
@@ -45,7 +45,7 @@ fn main() -> Result<(), Error> {
             color: Color::rgb(0, 0, 0),
         }));
 
-        state.draw_text("lmao", 40., 40., Color::rgb(0, 100, 0), 20.);
+        state.draw_text_absolute("lmao", 40., 40., Color::rgb(0, 100, 0), 20.);
 
         let event = connection.wait_for_event()?;
         let mut event_option = Some(event);
@@ -111,12 +111,14 @@ pub fn create_window(
             | EventMask::PROPERTY_CHANGE,
     );
 
+    let y = (screen.height_in_pixels - height) as i16;
+
     connection.create_window(
         COPY_DEPTH_FROM_PARENT,
         window_id,
         screen.root,
         0,
-        (screen.height_in_pixels - height) as i16,
+        y,
         width,
         height,
         0,
@@ -183,9 +185,12 @@ pub fn create_window(
         xid: window_id,
         connection,
         screen_num,
+        x: 0,
+        y: y.into(),
         width: width as u32,
         height: height as u32,
         atoms,
         display_scale,
+        window_type: WindowType::Normal,
     })
 }
