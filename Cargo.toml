@@ -28,6 +28,7 @@ dhat = { version = "0.3.2", optional = true }
 ctrlc = { version = "3.4.1", optional = true }
 env_logger = "0.10.0"
 thiserror = "1.0.50"
+chrono = "0.4.31"
 
 [dependencies.image]
 version = "0.24"

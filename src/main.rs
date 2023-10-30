@@ -3,7 +3,7 @@ use std::sync::Arc;
 use mdry::{color::Color, window::Window};
 use shareet::{
     create_window,
-    widgets::{pager::Pager, sys_tray::SysTray},
+    widgets::{pager::Pager, sys_time::SysTime, sys_tray::SysTray},
     Bar, Error,
 };
 use x11rb::{
@@ -60,10 +60,12 @@ fn main() -> Result<(), Error> {
         .change_window_attributes(screen.root, &change)?
         .check()?;
 
+    let foreground = Color::rgb(191, 189, 182);
+
     bar.widgets.push(Box::new(Pager::new(
         &connection,
         glyphon::Metrics::new(bar.state.height as f32, bar.state.height as f32),
-        Color::rgb(191, 189, 182),
+        foreground,
         Color::rgb(233, 86, 120),
         5.,
     )?));
@@ -76,6 +78,9 @@ fn main() -> Result<(), Error> {
         20,
         5,
     )?));
+
+    bar.widgets
+        .push(Box::new(SysTime::new(bar.state.height as f32, foreground)));
 
     for widget in bar.widgets.iter_mut() {
         widget

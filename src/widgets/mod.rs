@@ -3,6 +3,7 @@ use x11rb::xcb_ffi::XCBConnection;
 use mdry::State;
 
 pub mod pager;
+pub mod sys_time;
 pub mod sys_tray;
 pub mod text;
 
