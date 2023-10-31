@@ -1,3 +1,4 @@
+use crossbeam::channel::Sender;
 use x11rb::xcb_ffi::XCBConnection;
 
 use mdry::State;
@@ -13,6 +14,7 @@ pub trait Widget {
         state: &mut State,
         connection: &XCBConnection,
         screen_num: usize,
+        redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error>;
     fn on_event(
         &mut self,
@@ -20,6 +22,7 @@ pub trait Widget {
         screen_num: usize,
         state: &mut State,
         event: x11rb::protocol::Event,
+        redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error>;
 
     fn draw(

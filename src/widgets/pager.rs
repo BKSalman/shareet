@@ -1,3 +1,4 @@
+use crossbeam::channel::Sender;
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -104,6 +105,7 @@ impl Widget for Pager {
         state: &mut State,
         connection: &XCBConnection,
         screen_num: usize,
+        redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         let screen = &connection.setup().roots[screen_num];
 
@@ -132,7 +134,9 @@ impl Widget for Pager {
                         None,
                     );
 
-                    text_widget.setup(state, connection, screen_num).unwrap();
+                    text_widget
+                        .setup(state, connection, screen_num, redraw_sender.clone())
+                        .unwrap();
 
                     let offset = offset + text_widget.size(state) + self.padding;
 
@@ -172,6 +176,7 @@ impl Widget for Pager {
         screen_num: usize,
         state: &mut State,
         event: Event,
+        redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         let screen = &connection.setup().roots[screen_num];
         match event {

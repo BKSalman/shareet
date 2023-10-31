@@ -1,4 +1,5 @@
-use glyphon::Metrics;
+use crossbeam::channel::Sender;
+use glyphon::{Attrs, FontSystem, Metrics};
 use mdry::{color::Color, renderer::measure_text, State};
 
 use super::Widget;
@@ -52,6 +53,7 @@ impl Widget for TextWidget {
         state: &mut State,
         connection: &x11rb::xcb_ffi::XCBConnection,
         screen_num: usize,
+        redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         Ok(())
     }
@@ -62,6 +64,7 @@ impl Widget for TextWidget {
         screen_num: usize,
         state: &mut State,
         event: x11rb::protocol::Event,
+        redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         match event {
             x11rb::protocol::Event::Expose(_) => {

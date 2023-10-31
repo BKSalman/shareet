@@ -1,5 +1,9 @@
+use std::time::Duration;
+
 use chrono::{DateTime, Local};
+use crossbeam::channel::Sender;
 use mdry::color::Color;
+use smol::stream::StreamExt;
 
 use super::Widget;
 
@@ -26,7 +30,17 @@ impl Widget for SysTime {
         state: &mut mdry::State,
         connection: &x11rb::xcb_ffi::XCBConnection,
         screen_num: usize,
+        redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
+        std::thread::spawn(move || {
+            smol::block_on(async {
+                loop {
+                    smol::Timer::interval(Duration::from_secs(1)).next().await;
+                    redraw_sender.send(()).unwrap();
+                }
+            });
+        });
+
         Ok(())
     }
 
@@ -36,9 +50,8 @@ impl Widget for SysTime {
         screen_num: usize,
         state: &mut mdry::State,
         event: x11rb::protocol::Event,
+        redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
-        self.current_time = Local::now();
-
         Ok(())
     }
 
@@ -50,7 +63,7 @@ impl Widget for SysTime {
         offset: f32,
     ) -> Result<(), crate::Error> {
         state.draw_text_absolute(
-            &self.current_time.format("%H:%M:%S").to_string(),
+            &Local::now().format("%H:%M:%S").to_string(),
             20. + offset,
             0.,
             self.color,

@@ -1,3 +1,4 @@
+use crossbeam::channel::Sender;
 use mdry::{x11rb::Event, State};
 use x11rb::{
     connection::Connection,
@@ -260,6 +261,7 @@ impl Widget for SysTray {
         state: &mut mdry::State,
         connection: &XCBConnection,
         screen_num: usize,
+        redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         let screen = &connection.setup().roots[screen_num];
         connection
@@ -366,6 +368,7 @@ impl Widget for SysTray {
         screen_num: usize,
         state: &mut mdry::State,
         event: x11rb::protocol::Event,
+        redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         match event {
             Event::ClientMessage(event) => {
