@@ -82,8 +82,9 @@ fn main() -> Result<(), Error> {
     bar.widgets
         .push(Box::new(SysTime::new(bar.state.height as f32, foreground)));
 
-    bar.widgets
-        .push(Box::new(CPUUsage::new(bar.state.height as f32, foreground)));
+    // XXX: broken
+    // bar.widgets
+    //     .push(Box::new(CPUUsage::new(bar.state.height as f32, foreground)));
 
     let (event_sender, event_receiver) = crossbeam::channel::unbounded::<Event>();
     let (redraw_sender, redraw_receiver) = crossbeam::channel::unbounded::<()>();
