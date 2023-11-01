@@ -374,21 +374,25 @@ impl TextInner {
         content: &str,
         x: f32,
         y: f32,
-        width: f32,
-        height: f32,
+        initial_width: f32,
+        initial_height: f32,
         font_size: f32,
         color: Color,
         font: Font,
     ) -> Self {
         let mut buffer = glyphon::Buffer::new(font_system, Metrics::new(font_size, font_size));
-        buffer.set_size(font_system, width, height);
+        buffer.set_size(font_system, initial_width, initial_height);
 
         buffer.set_text(
             font_system,
             content,
-            Attrs::new().color(color.into()),
+            Attrs::new().family(font.family.into_glyphon_family()),
             Shaping::Advanced,
         );
+
+        let (width, height) = measure_text(&buffer);
+
+        buffer.set_size(font_system, width, height);
 
         Self {
             x,

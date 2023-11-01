@@ -381,9 +381,6 @@ impl Widget for SysTray {
         event: x11rb::protocol::Event,
         redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
-        // if !matches!(event, Event::MotionNotify(_)) {
-        //     println!("{event:#?}");
-        // }
         match event {
             Event::ClientMessage(event) => {
                 if event.type_ == state.window.atoms._NET_SYSTEM_TRAY_OPCODE {

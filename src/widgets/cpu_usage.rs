@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use chrono::Local;
 use crossbeam::channel::Sender;
@@ -8,26 +11,32 @@ use mdry::{
     renderer::{measure_text, Font, TextInner},
 };
 use smol::stream::StreamExt;
+use sysinfo::{CpuExt, SystemExt};
 
 use super::Widget;
 
-pub struct SysTime {
+pub struct CPUUsage {
     font_size: f32,
     color: Color,
     text: Option<Arc<TextInner>>,
+    system: sysinfo::System,
 }
 
-impl SysTime {
+impl CPUUsage {
     pub fn new(font_size: f32, color: Color) -> Self {
+        let system = sysinfo::System::new_with_specifics(
+            sysinfo::RefreshKind::new().with_cpu(sysinfo::CpuRefreshKind::new().with_cpu_usage()),
+        );
         Self {
             font_size,
             color,
             text: None,
+            system,
         }
     }
 }
 
-impl Widget for SysTime {
+impl Widget for CPUUsage {
     fn setup(
         &mut self,
         state: &mut mdry::State,
@@ -85,8 +94,9 @@ impl Widget for SysTime {
         let text = self.text.take().expect("text should always be initialized");
         match Arc::try_unwrap(text) {
             Ok(mut inner) => {
+                self.system.refresh_cpu();
                 inner.x = offset;
-                inner.content = Local::now().format("%H:%M:%S").to_string();
+                inner.content = format!(" {}%", self.system.global_cpu_info().cpu_usage() as u32);
                 inner.buffer.set_text(
                     state.font_system_mut(),
                     &inner.content,
@@ -95,21 +105,21 @@ impl Widget for SysTime {
                 );
 
                 let (width, height) = measure_text(&inner.buffer);
+                inner.bounds.left = inner.x as i32;
                 inner.bounds.right = (inner.x + width) as i32;
-                inner.bounds.bottom = (inner.y + height) as i32;
                 inner
                     .buffer
                     .set_size(state.font_system_mut(), width, height);
 
                 self.text = Some(Arc::new(inner));
             }
-            Err(inner_arc) => {
+            Err(_inner_arc) => {
                 let width = state.width as f32;
                 let height = state.height as f32;
                 let scale = state.window.display_scale;
                 self.text = Some(Arc::new(TextInner::new(
                     state.font_system_mut(),
-                    &Local::now().format("%H:%M:%S").to_string(),
+                    &format!(" {}%", self.system.global_cpu_info().cpu_usage() as u32),
                     0.,
                     0.,
                     width * scale,
@@ -118,7 +128,6 @@ impl Widget for SysTime {
                     self.color,
                     Font::DEFAULT,
                 )));
-                self.text = Some(inner_arc);
             }
         }
 
