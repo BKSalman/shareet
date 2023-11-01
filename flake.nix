@@ -8,7 +8,7 @@
     };
   };
 
-  outputs = { nixpkgs, rust-overlay, crane, ... }:
+  outputs = { self, nixpkgs, rust-overlay, crane, ... }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; };
@@ -66,6 +66,11 @@
 
         default = shareet;
       };
+
+      overlays.default = final: prev: {
+        shareet = self.packages.${system}.shareet;
+      };
+
 
       devShells.${system}.default = mkShell {
         NIX_CFLAGS_LINK = "-fuse-ld=mold";
