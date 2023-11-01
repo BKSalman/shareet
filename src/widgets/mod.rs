@@ -8,6 +8,11 @@ pub mod sys_time;
 pub mod sys_tray;
 pub mod text;
 
+pub enum Alignment {
+    Left,
+    Right,
+}
+
 pub trait Widget {
     fn setup(
         &mut self,
@@ -33,8 +38,12 @@ pub trait Widget {
         offset: f32,
     ) -> Result<(), crate::Error>;
 
-    fn size(&self, state: &mut State) -> f32 {
+    fn size(&mut self, _state: &mut State) -> f32 {
         0.
+    }
+
+    fn alignment(&self) -> Alignment {
+        Alignment::Left
     }
 
     fn requires_redraw(&self) -> bool {

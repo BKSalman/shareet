@@ -7,7 +7,6 @@ use wgpu::util::DeviceExt;
 use crate::color::Color;
 use crate::shapes::Mesh;
 use crate::VertexColored;
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 use std::ops::Range;

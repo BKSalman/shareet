@@ -17,6 +17,7 @@
         libxkbcommon
         vulkan-loader
 
+        pkg-config
         # wayland # maybe after I support wayland
         libGL
 

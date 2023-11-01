@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use chrono::Local;
 use crossbeam::channel::Sender;
-use glyphon::{Attrs, FontSystem, Metrics, Shaping};
+use glyphon::{Attrs, Metrics, Shaping};
 use mdry::{
     color::Color,
     renderer::{measure_text, Font, TextInner},
@@ -15,7 +15,6 @@ pub struct SysTime {
     font_size: f32,
     color: Color,
     text: Option<Arc<TextInner>>,
-    x: f32,
 }
 
 impl SysTime {
@@ -24,7 +23,6 @@ impl SysTime {
             font_size,
             color,
             text: None,
-            x: 0.,
         }
     }
 }
@@ -33,8 +31,8 @@ impl Widget for SysTime {
     fn setup(
         &mut self,
         state: &mut mdry::State,
-        connection: &x11rb::xcb_ffi::XCBConnection,
-        screen_num: usize,
+        _connection: &x11rb::xcb_ffi::XCBConnection,
+        _screen_num: usize,
         redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         let text = Arc::new(TextInner::new(
@@ -84,19 +82,19 @@ impl Widget for SysTime {
 
     fn on_event(
         &mut self,
-        connection: &x11rb::xcb_ffi::XCBConnection,
-        screen_num: usize,
-        state: &mut mdry::State,
-        event: x11rb::protocol::Event,
-        redraw_sender: Sender<()>,
+        _connection: &x11rb::xcb_ffi::XCBConnection,
+        _screen_num: usize,
+        _state: &mut mdry::State,
+        _event: x11rb::protocol::Event,
+        _redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         Ok(())
     }
 
     fn draw(
         &mut self,
-        connection: &x11rb::xcb_ffi::XCBConnection,
-        screen_num: usize,
+        _connection: &x11rb::xcb_ffi::XCBConnection,
+        _screen_num: usize,
         state: &mut mdry::State,
         offset: f32,
     ) -> Result<(), crate::Error> {
@@ -117,7 +115,7 @@ impl Widget for SysTime {
                 inner
                     .buffer
                     .set_size(state.font_system_mut(), width, height);
-                inner.x = offset + 50.;
+                inner.x = offset;
 
                 self.text = Some(Arc::new(inner));
             }
@@ -132,5 +130,28 @@ impl Widget for SysTime {
         }
 
         Ok(())
+    }
+
+    fn size(&mut self, _state: &mut mdry::State) -> f32 {
+        let text = self.text.take().expect("text should always be initialized");
+        let size = match Arc::try_unwrap(text) {
+            Ok(inner) => {
+                let (width, _height) = measure_text(&inner.buffer);
+                self.text = Some(Arc::new(inner));
+
+                width
+            }
+            Err(inner_arc) => {
+                // TODO: replace the whole thing
+                self.text = Some(inner_arc);
+                0.
+            }
+        };
+
+        size + 10.
+    }
+
+    fn alignment(&self) -> super::Alignment {
+        super::Alignment::Right
     }
 }

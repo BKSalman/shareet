@@ -1,9 +1,5 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Weak},
-};
+use std::{collections::HashMap, sync::Arc};
 
-use ::x11rb::protocol::Event;
 use glyphon::{Attrs, FontSystem, Metrics, Shaping, SwashCache, TextArea, TextAtlas};
 use renderer::{
     measure_text, CachedText, Font, ManagedText, Renderer, TextCacheKey, TextRenderer, TextTypes,
@@ -301,10 +297,6 @@ impl<'a> State<'a> {
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
         }
-    }
-
-    pub fn input(&mut self, event: &Event) -> bool {
-        false
     }
 
     pub fn update(&mut self) -> Result<(), wgpu::SurfaceError> {

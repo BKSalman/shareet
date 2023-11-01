@@ -1,5 +1,4 @@
 use crossbeam::channel::Sender;
-use glyphon::FontSystem;
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -22,10 +21,10 @@ const HAND_CURSOR: u16 = 60;
 const LEFTPTR_CURSOR: u16 = 68;
 
 const LEFT_BTN: u8 = 1;
-const RIGHT_BTN: u8 = 2;
-const MIDDLE_BTN: u8 = 3;
-const SCROLL_UP: u8 = 4;
-const SCROLL_DOWN: u8 = 5;
+// const RIGHT_BTN: u8 = 2;
+// const MIDDLE_BTN: u8 = 3;
+// const SCROLL_UP: u8 = 4;
+// const SCROLL_DOWN: u8 = 5;
 
 pub struct Pager {
     text_metrics: glyphon::Metrics,
@@ -49,7 +48,6 @@ impl Pager {
         text_color: Color,
         selector_color: Color,
         padding: f32,
-        font_system: &mut FontSystem,
     ) -> Result<Self, crate::Error> {
         let font = connection.generate_id()?;
         connection.open_font(font, b"cursor")?;
@@ -181,7 +179,7 @@ impl Widget for Pager {
         screen_num: usize,
         state: &mut State,
         event: Event,
-        redraw_sender: Sender<()>,
+        _redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         let screen = &connection.setup().roots[screen_num];
         match event {
@@ -219,7 +217,7 @@ impl Widget for Pager {
                 let event_x = event.event_x as f32;
                 let hover = self
                     .desktops
-                    .iter()
+                    .iter_mut()
                     .enumerate()
                     .map(|(i, tw)| (i, tw.x(), tw.size(state)))
                     .find(|(_, x, width)| hover(event_x, *x, *width, self.padding));
@@ -273,7 +271,7 @@ impl Widget for Pager {
         }
 
         if let Some(current_desktop_index) = self.current_desktop {
-            let current_desktop = &self.desktops[current_desktop_index];
+            let current_desktop = &mut self.desktops[current_desktop_index];
 
             let rect = Rect {
                 x: current_desktop.x() + offset,
@@ -289,9 +287,9 @@ impl Widget for Pager {
         Ok(())
     }
 
-    fn size(&self, state: &mut State) -> f32 {
+    fn size(&mut self, state: &mut State) -> f32 {
         self.desktops
-            .iter()
+            .iter_mut()
             .map(|t| t.size(state) + self.padding)
             .sum::<f32>()
             + self.padding

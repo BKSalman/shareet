@@ -1,6 +1,5 @@
 use crossbeam::channel::Sender;
-use glyphon::{Attrs, FontSystem, Metrics};
-use mdry::{color::Color, renderer::measure_text, State};
+use mdry::{color::Color, State};
 
 use super::Widget;
 
@@ -56,21 +55,21 @@ impl TextWidget {
 impl Widget for TextWidget {
     fn setup(
         &mut self,
-        state: &mut State,
-        connection: &x11rb::xcb_ffi::XCBConnection,
-        screen_num: usize,
-        redraw_sender: Sender<()>,
+        _state: &mut State,
+        _connection: &x11rb::xcb_ffi::XCBConnection,
+        _screen_num: usize,
+        _redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         Ok(())
     }
 
     fn on_event(
         &mut self,
-        connection: &x11rb::xcb_ffi::XCBConnection,
-        screen_num: usize,
-        state: &mut State,
+        _connection: &x11rb::xcb_ffi::XCBConnection,
+        _screen_num: usize,
+        _state: &mut State,
         event: x11rb::protocol::Event,
-        redraw_sender: Sender<()>,
+        _redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         match event {
             x11rb::protocol::Event::Expose(_) => {
@@ -83,8 +82,8 @@ impl Widget for TextWidget {
 
     fn draw(
         &mut self,
-        connection: &x11rb::xcb_ffi::XCBConnection,
-        screen_num: usize,
+        _connection: &x11rb::xcb_ffi::XCBConnection,
+        _screen_num: usize,
         state: &mut State,
         offset: f32,
     ) -> Result<(), crate::Error> {
@@ -99,7 +98,7 @@ impl Widget for TextWidget {
         Ok(())
     }
 
-    fn size(&self, state: &mut State) -> f32 {
+    fn size(&mut self, _state: &mut State) -> f32 {
         self.width
     }
 

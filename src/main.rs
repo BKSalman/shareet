@@ -9,7 +9,7 @@ use shareet::{
 use x11rb::{
     connection::Connection,
     protocol::{
-        xproto::{ChangeWindowAttributesAux, ConfigureWindowAux, ConnectionExt, EventMask},
+        xproto::{ChangeWindowAttributesAux, ConnectionExt, EventMask},
         Event,
     },
     xcb_ffi::XCBConnection,
@@ -59,6 +59,7 @@ fn main() -> Result<(), Error> {
         .check()?;
 
     let foreground = Color::rgb(191, 189, 182);
+    let background = Color::rgb(26, 29, 36);
 
     bar.widgets.push(Box::new(Pager::new(
         &connection,
@@ -66,7 +67,6 @@ fn main() -> Result<(), Error> {
         foreground,
         Color::rgb(233, 86, 120),
         5.,
-        bar.state.font_system_mut(),
     )?));
 
     bar.widgets.push(Box::new(SysTray::new(
@@ -76,6 +76,7 @@ fn main() -> Result<(), Error> {
         bar.state.height,
         20,
         5,
+        background,
     )?));
 
     bar.widgets
@@ -136,28 +137,10 @@ fn main() -> Result<(), Error> {
                     Event::PropertyNotify(event) if event.window == screen.root => {
                         redraw_sender.send(()).unwrap();
                     }
-                    Event::Expose(event) => {
-                        let width = event.width as u32;
-                        let height = event.height as u32;
-                        let configure = ConfigureWindowAux::new().width(width).height(height);
-                        connection.configure_window(event.window, &configure)?;
-                        if bar.state.width != width || bar.state.height != height {
-                            bar.state.resize(width, height);
-                        }
-
-                        redraw_sender.send(()).unwrap();
-                    }
-                    Event::LeaveNotify(_) => redraw_sender.send(()).unwrap(),
-                    Event::EnterNotify(_) => redraw_sender.send(()).unwrap(),
-                    Event::ConfigureNotify(event) => {
-                        let width = event.width as u32;
-                        let height = event.height as u32;
-                        if bar.state.width != width || bar.state.height != height {
-                            bar.state.resize(width, height);
-                        }
-
-                        redraw_sender.send(()).unwrap();
-                    }
+                    Event::Expose(_) => redraw_sender.send(())?,
+                    Event::LeaveNotify(_) => redraw_sender.send(())?,
+                    Event::EnterNotify(_) => redraw_sender.send(())?,
+                    Event::ConfigureNotify(_) => redraw_sender.send(())?,
                     _ => {}
                 }
 
@@ -171,11 +154,22 @@ fn main() -> Result<(), Error> {
                 }
             },
             recv(redraw_receiver) -> _ => {
-                bar.state.clear_background(Color::rgb(26, 29, 36));
-                let mut offset = 0.;
+                let width = bar.state.width as f32;
+                bar.state.clear_background(background);
+                let mut roffset = 0.;
+                let mut loffset = 0.;
                 for widget in bar.widgets.iter_mut() {
-                    widget.draw(&connection, screen_num, &mut bar.state, offset)?;
-                    offset += widget.size(&mut bar.state);
+                    let size = widget.size(&mut bar.state);
+                    match widget.alignment() {
+                        shareet::widgets::Alignment::Left => {
+                            widget.draw(&connection, screen_num, &mut bar.state, loffset)?;
+                            loffset += size;
+                        },
+                        shareet::widgets::Alignment::Right => {
+                            widget.draw(&connection, screen_num, &mut bar.state, width - roffset - size)?;
+                            roffset += size;
+                        },
+                    }
                 }
                 bar.state.update()?;
                 match bar.state.render() {

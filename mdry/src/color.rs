@@ -32,9 +32,11 @@ impl Color {
 
         None
     }
+
     pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
     }
+
     pub fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b, a: 255 }
     }
@@ -63,6 +65,14 @@ impl Color {
             self.g as f32 / 255.,
             self.b as f32 / 255.,
         ]
+    }
+
+    pub fn to_rgba_u32(&self) -> u32 {
+        ((self.r as u32) << 24) | ((self.g as u32) << 16) | ((self.b as u32) << 8) | self.a as u32
+    }
+
+    pub fn to_argb_u32(&self) -> u32 {
+        ((self.a as u32) << 24) | ((self.r as u32) << 16) | ((self.g as u32) << 8) | self.b as u32
     }
 }
 

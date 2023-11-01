@@ -1,5 +1,5 @@
 use crossbeam::channel::Sender;
-use mdry::{x11rb::Event, State};
+use mdry::{color::Color, x11rb::Event, State};
 use x11rb::{
     connection::Connection,
     protocol::xproto::{
@@ -76,15 +76,19 @@ const XEMBED_MAPPED: u32 = 1 << 0;
 pub struct SysTray {
     selection_owner: Window,
     tray_icons: Vec<TrayIcon>,
-    x: u32,
     _net_system_tray_s: u32,
     icons_size: u32,
     padding: u32,
+    background_color: Color,
 }
 
+#[derive(Debug)]
 struct TrayIcon {
     embedded_window: Window,
     wrapper_window: Window,
+    should_be_mapped: bool,
+    should_be_unmapped: bool,
+    has_been_mapped: bool,
 }
 
 type Error = Box<dyn std::error::Error>;
@@ -97,6 +101,7 @@ impl SysTray {
         bar_height: u32,
         icons_size: u32,
         padding: u32,
+        background_color: Color,
     ) -> Result<Self, Error> {
         let create = CreateWindowAux::new();
         let win_id = connection.generate_id()?;
@@ -126,10 +131,10 @@ impl SysTray {
         Ok(Self {
             selection_owner: win_id,
             tray_icons: Vec::new(),
-            x: bar_width - 1,
             _net_system_tray_s,
             icons_size,
             padding,
+            background_color,
         })
     }
 
@@ -160,15 +165,17 @@ impl SysTray {
                 .configure_window(embedded_window, &configure)?
                 .check()?;
 
+            let attrs = ChangeWindowAttributesAux::new().event_mask(EventMask::STRUCTURE_NOTIFY);
+            connection
+                .change_window_attributes(embedded_window, &attrs)?
+                .check()?;
+
             // create a wrapper window to match the depth, visual to be able to reparent it
             // and also match the  geometry of the embedded window
             let wrapper_window = connection.generate_id()?;
 
-            let create = CreateWindowAux::new();
-
-            let x = (state.width
-                - ((self.icons_size + self.padding) * self.tray_icons.len() as u32) as u32)
-                as i16;
+            let create =
+                CreateWindowAux::new().background_pixel(self.background_color.to_argb_u32());
 
             let y = ((state.height / 2) - self.icons_size / 2) as i16;
 
@@ -177,7 +184,7 @@ impl SysTray {
                     COPY_DEPTH_FROM_PARENT,
                     wrapper_window,
                     state.window.xid,
-                    x,
+                    0,
                     y,
                     20,
                     20,
@@ -196,10 +203,13 @@ impl SysTray {
                 .reparent_window(embedded_window, wrapper_window, 0, 0)?
                 .check()?;
 
-            self.tray_icons.push(TrayIcon {
+            let mut tray_icon = TrayIcon {
                 embedded_window,
                 wrapper_window,
-            });
+                should_be_mapped: false,
+                has_been_mapped: false,
+                should_be_unmapped: false,
+            };
 
             // get version from client/embedded window in the _XEMBED_INFO property
             let xembed_info = connection
@@ -242,9 +252,10 @@ impl SysTray {
             let mapped = xembed_info[1];
 
             if mapped == XEMBED_MAPPED {
-                connection.map_window(wrapper_window)?.check()?;
-                connection.map_window(embedded_window)?.check()?;
+                tray_icon.should_be_mapped = true;
             }
+
+            self.tray_icons.push(tray_icon);
         } else if message == SYSTEM_TRAY_BEGIN_MESSAGE {
             println!("got SYSTEM_TRAY_BEGIN_MESSAGE");
         } else if message == SYSTEM_TRAY_CANCEL_MESSAGE {
@@ -261,7 +272,7 @@ impl Widget for SysTray {
         state: &mut mdry::State,
         connection: &XCBConnection,
         screen_num: usize,
-        redraw_sender: Sender<()>,
+        _redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
         let screen = &connection.setup().roots[screen_num];
         connection
@@ -365,16 +376,20 @@ impl Widget for SysTray {
     fn on_event(
         &mut self,
         connection: &XCBConnection,
-        screen_num: usize,
+        _screen_num: usize,
         state: &mut mdry::State,
         event: x11rb::protocol::Event,
         redraw_sender: Sender<()>,
     ) -> Result<(), crate::Error> {
+        // if !matches!(event, Event::MotionNotify(_)) {
+        //     println!("{event:#?}");
+        // }
         match event {
             Event::ClientMessage(event) => {
                 if event.type_ == state.window.atoms._NET_SYSTEM_TRAY_OPCODE {
                     let message_data = event.data.as_data32();
                     self.embed_client(connection, message_data, &state)?;
+                    return Ok(());
                 }
 
                 if event.type_ == self._net_system_tray_s {
@@ -389,7 +404,7 @@ impl Widget for SysTray {
             Event::PropertyNotify(event) => {
                 if let Some(tray_icon) = self
                     .tray_icons
-                    .iter()
+                    .iter_mut()
                     .find(|ti| ti.embedded_window == event.window)
                 {
                     let xembed_info = connection
@@ -410,15 +425,34 @@ impl Widget for SysTray {
                     let mapped = xembed_info[1];
 
                     if mapped == XEMBED_MAPPED {
-                        connection.map_window(tray_icon.embedded_window)?.check()?;
-                        connection.map_window(tray_icon.wrapper_window)?.check()?;
+                        tray_icon.should_be_mapped = true;
+                        tray_icon.has_been_mapped = false;
+                        redraw_sender.send(())?;
                     } else {
-                        connection
-                            .unmap_window(tray_icon.embedded_window)?
-                            .check()?;
-                        connection.unmap_window(tray_icon.wrapper_window)?.check()?;
+                        tray_icon.should_be_unmapped = true;
+                        redraw_sender.send(())?;
                     }
                 }
+            }
+            Event::UnmapNotify(event) => {
+                self.tray_icons.retain(|ti| {
+                    if ti.embedded_window == event.window {
+                        let _ = connection.destroy_window(ti.wrapper_window);
+                        return false;
+                    }
+
+                    true
+                });
+            }
+            Event::DestroyNotify(event) => {
+                self.tray_icons.retain(|ti| {
+                    if ti.embedded_window == event.window {
+                        let _ = connection.destroy_window(ti.wrapper_window);
+                        return false;
+                    }
+
+                    true
+                });
             }
             _ => {}
         }
@@ -429,10 +463,34 @@ impl Widget for SysTray {
     fn draw(
         &mut self,
         connection: &XCBConnection,
-        screen_num: usize,
-        state: &mut mdry::State,
+        _screen_num: usize,
+        _state: &mut mdry::State,
         offset: f32,
     ) -> Result<(), crate::Error> {
+        for (i, ti) in self.tray_icons.iter_mut().enumerate() {
+            let x = (offset + ((self.icons_size + self.padding) * i as u32) as f32) as i32;
+            let configure = ConfigureWindowAux::new().x(x);
+            connection.configure_window(ti.wrapper_window, &configure)?;
+            if ti.should_be_mapped && !ti.has_been_mapped {
+                connection.map_window(ti.wrapper_window)?;
+                connection.map_window(ti.embedded_window)?;
+                ti.has_been_mapped = true;
+            } else if ti.should_be_unmapped {
+                connection.unmap_window(ti.embedded_window)?;
+                connection.unmap_window(ti.wrapper_window)?;
+                ti.has_been_mapped = false;
+                ti.should_be_mapped = false;
+            }
+        }
+
         Ok(())
+    }
+
+    fn size(&mut self, _state: &mut State) -> f32 {
+        ((self.icons_size + self.padding) * self.tray_icons.len() as u32) as f32
+    }
+
+    fn alignment(&self) -> super::Alignment {
+        super::Alignment::Right
     }
 }
