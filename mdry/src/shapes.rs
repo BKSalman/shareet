@@ -6,16 +6,6 @@ pub struct Mesh {
     pub vertices: Vec<VertexColored>,
 }
 
-impl Mesh {
-    pub fn add_offset(mut self, offset: f32) -> Self {
-        for vertex in self.vertices.iter_mut() {
-            vertex.add_offset_mut(offset);
-        }
-
-        self
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Rect {
     pub x: f32,

@@ -1,9 +1,18 @@
+use std::{
+    collections::HashMap,
+    sync::{Arc, Weak},
+};
+
 use ::x11rb::protocol::Event;
 use glyphon::{Attrs, FontSystem, Metrics, Shaping, SwashCache, TextArea, TextAtlas};
-use renderer::{measure_text, Renderer, Text, TextRenderer};
+use renderer::{
+    measure_text, CachedText, Font, ManagedText, Renderer, TextCacheKey, TextRenderer, TextTypes,
+};
 use shapes::{Mesh, Shape};
 use wgpu::MultisampleState;
 use window::Window;
+
+use crate::renderer::TextInner;
 
 pub mod x11rb {
     pub use x11rb::protocol::Event;
@@ -23,17 +32,6 @@ pub struct VertexColored {
 }
 
 impl VertexColored {
-    pub fn add_offset_mut(&mut self, offset: f32) {
-        self.position[0] += offset;
-    }
-    pub fn add_offset(&self, offset: f32) -> [f32; 3] {
-        [
-            self.position[0] + offset,
-            self.position[1],
-            self.position[2],
-        ]
-    }
-
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<VertexColored>() as wgpu::BufferAddress,
@@ -68,10 +66,12 @@ pub struct State<'a> {
     renderer: Renderer,
     text_renderer: TextRenderer,
     clear_background: Option<crate::color::Color>,
-    texts: Vec<Text>,
+    texts: Vec<TextTypes>,
     meshes: Vec<Mesh>,
     /// kind of a stupid way to measure the text size
     measure_text_buffer: glyphon::Buffer,
+    text_cache: HashMap<TextCacheKey, glyphon::Buffer>,
+    default_font: Font,
 }
 
 impl<'a> State<'a> {
@@ -167,6 +167,8 @@ impl<'a> State<'a> {
             texts: Vec::new(),
             meshes: Vec::new(),
             measure_text_buffer,
+            text_cache: HashMap::new(),
+            default_font: Font::DEFAULT,
         }
     }
 
@@ -312,16 +314,90 @@ impl<'a> State<'a> {
                 label: Some("Update Render Encoder"),
             });
 
+        #[derive(Debug)]
+        enum Allocation {
+            Managed(Option<Arc<TextInner>>),
+            Cached(TextCacheKey),
+        }
+
         let texts = std::mem::take(&mut self.texts);
+        let allocations: Vec<Allocation> = texts
+            .iter()
+            .map(|t| match t {
+                TextTypes::Managed { text } => {
+                    let text = text.upgrade();
+                    Allocation::Managed(text)
+                }
+                TextTypes::Cached(text) => {
+                    let key = TextCacheKey {
+                        content: text.content.clone(),
+                        font_size: text.font_size.to_bits(),
+                        line_height: text.line_height.to_bits(),
+                        font: text.font,
+                        bounds: text.bounds,
+                        shaping: text.shaping,
+                    };
+                    if let Some(_) = self.text_cache.get(&key) {
+                        Allocation::Cached(key)
+                    } else {
+                        let mut buffer = glyphon::Buffer::new(
+                            &mut self.text_renderer.font_system,
+                            Metrics::new(text.font_size, text.line_height),
+                        );
+
+                        buffer.set_size(
+                            &mut self.text_renderer.font_system,
+                            self.width as f32,
+                            self.height as f32,
+                        );
+
+                        buffer.set_text(
+                            &mut self.text_renderer.font_system,
+                            &text.content,
+                            Attrs::new().color(text.color.into()),
+                            text.shaping,
+                        );
+
+                        self.text_cache.insert(key.clone(), buffer);
+                        Allocation::Cached(key)
+                    }
+                }
+            })
+            .collect();
+
         let texts = texts
             .iter()
-            .map(|t| TextArea {
-                buffer: &t.buffer,
-                left: t.x,
-                top: t.y,
-                scale: self.window.display_scale,
-                bounds: t.bounds,
-                default_color: t.color,
+            .zip(allocations.iter())
+            .filter_map(|(text, allocation)| match text {
+                TextTypes::Managed { .. } => {
+                    let Allocation::Managed(Some(text)) = allocation else {
+                        return None;
+                    };
+
+                    Some(TextArea {
+                        buffer: &text.buffer,
+                        left: text.x,
+                        top: text.y,
+                        scale: self.window.display_scale,
+                        bounds: text.bounds,
+                        default_color: text.color.into(),
+                    })
+                }
+                TextTypes::Cached(text) => {
+                    let Allocation::Cached(key) = allocation else {
+                            return None;
+                        };
+                    let buffer = self.text_cache.get(key).expect("Get cached buffer");
+
+                    Some(TextArea {
+                        buffer,
+                        left: text.x,
+                        top: text.y,
+                        scale: self.window.display_scale,
+                        bounds: text.bounds,
+                        default_color: text.color.into(),
+                    })
+                }
             })
             .collect();
 
@@ -476,54 +552,44 @@ impl<'a> State<'a> {
         }
     }
 
-    pub fn draw_text_absolute(
+    pub fn draw_text_absolute(&mut self, text: Arc<TextInner>) {
+        self.texts.push(TextTypes::Managed {
+            text: ManagedText {
+                raw: Arc::downgrade(&text),
+            },
+        });
+    }
+
+    /// draw a text with a cached text buffer
+    /// `[cache_text_buffer]` must be called to cache the text buffer
+    /// this method will return `Err` if the buffer is not cached already
+    ///
+    /// this is useful when the text doesn't change
+    /// so the buffer could be reused instead of recreating the buffer every draw
+    pub fn draw_text_absolute_cached(
         &mut self,
         content: &str,
         x: f32,
         y: f32,
         color: crate::color::Color,
         font_size: f32,
-    ) -> &glyphon::Buffer {
-        let mut text_buffer = glyphon::Buffer::new(
-            &mut self.text_renderer.font_system,
-            Metrics::new(font_size, font_size),
-        );
-
-        let physical_width = self.width as f32 * self.window.display_scale;
-        let physical_height = self.height as f32 * self.window.display_scale;
-
-        text_buffer.set_size(
-            &mut self.text_renderer.font_system,
-            physical_width,
-            physical_height,
-        );
-        text_buffer.set_text(
-            &mut self.text_renderer.font_system,
-            content,
-            Attrs::new().family(glyphon::Family::Monospace),
-            Shaping::Advanced,
-        );
-        // text_buffer.shape_until_scroll(&mut self.text_renderer.font_system);
-
-        let (width, height) = measure_text(&text_buffer);
-
-        text_buffer.set_size(&mut self.text_renderer.font_system, width, height);
-
-        self.texts.push(Text {
+    ) {
+        self.texts.push(TextTypes::Cached(CachedText {
             x,
             y,
-            color: color.into(),
             content: content.to_string(),
             bounds: glyphon::TextBounds {
                 left: x as i32,
                 top: y as i32,
-                right: (width + x).ceil() as i32,
-                bottom: (height + y).ceil() as i32,
+                right: self.width as i32,
+                bottom: self.height as i32,
             },
-            buffer: text_buffer,
-        });
-
-        &self.texts[self.texts.len() - 1].buffer
+            color,
+            font_size,
+            line_height: font_size,
+            font: self.default_font,
+            shaping: Shaping::Advanced,
+        }));
     }
 
     pub fn measure_text(&mut self, text: &str, metrics: Metrics) -> (f32, f32) {

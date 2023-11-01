@@ -1,10 +1,17 @@
-use glyphon::{Resolution, SwashCache, TextArea, TextBounds};
+use glyphon::{
+    Attrs, FontSystem, Metrics, Resolution, Shaping, Stretch, Style, SwashCache, TextArea,
+    TextBounds, Weight,
+};
 use wgpu::util::DeviceExt;
 
+use crate::color::Color;
 use crate::shapes::Mesh;
 use crate::VertexColored;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 use std::ops::Range;
+use std::sync::Arc;
 
 const SCALE_FACTOR: Option<&str> = option_env!("SCALE_FACTOR");
 
@@ -335,21 +342,189 @@ pub struct TextRenderer {
     pub(crate) atlas: glyphon::TextAtlas,
 }
 
+pub enum TextTypes {
+    Managed { text: ManagedText },
+    Cached(CachedText),
+}
+
 #[derive(Debug)]
-pub struct Text {
+pub struct ManagedText {
+    pub(crate) raw: std::sync::Weak<TextInner>,
+}
+
+impl ManagedText {
+    pub fn upgrade(&self) -> Option<Arc<TextInner>> {
+        self.raw.upgrade()
+    }
+}
+
+#[derive(Debug)]
+pub struct TextInner {
     pub x: f32,
     pub y: f32,
-    pub color: glyphon::Color,
+    pub color: Color,
     pub content: String,
     pub bounds: TextBounds,
     pub buffer: glyphon::Buffer,
+    pub font: Font,
 }
 
-impl Text {
-    pub fn add_offset(&mut self, offset: f32) {
-        self.x += offset;
-        self.bounds.left += offset as i32;
-        self.bounds.right += offset as i32;
+impl TextInner {
+    pub fn new(
+        font_system: &mut FontSystem,
+        content: &str,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        font_size: f32,
+        color: Color,
+        font: Font,
+    ) -> Self {
+        let mut buffer = glyphon::Buffer::new(font_system, Metrics::new(font_size, font_size));
+        buffer.set_size(font_system, width, height);
+
+        buffer.set_text(
+            font_system,
+            content,
+            Attrs::new().color(color.into()),
+            Shaping::Advanced,
+        );
+
+        Self {
+            x,
+            y,
+            color,
+            content: content.to_string(),
+            bounds: TextBounds {
+                left: x as i32,
+                top: y as i32,
+                right: (x + width) as i32,
+                bottom: (y + height) as i32,
+            },
+            buffer,
+            font,
+        }
+    }
+}
+
+pub struct CachedText {
+    pub x: f32,
+    pub y: f32,
+    pub content: String,
+    pub bounds: TextBounds,
+    pub color: Color,
+    pub font_size: f32,
+    pub line_height: f32,
+    pub font: Font,
+    pub shaping: Shaping,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextCacheKey {
+    pub content: String,
+    // this is u32 just for Eq
+    pub font_size: u32,
+    // this is u32 just for Eq
+    pub line_height: u32,
+    pub font: Font,
+    pub bounds: TextBounds,
+    pub shaping: Shaping,
+}
+
+impl<'a> Hash for TextCacheKey {
+    fn hash<H: Hasher>(&self, mut hasher: &mut H) {
+        self.content.hash(&mut hasher);
+        self.font_size.hash(&mut hasher);
+        self.line_height.hash(&mut hasher);
+        self.font.hash(&mut hasher);
+        self.bounds.left.hash(&mut hasher);
+        self.bounds.top.hash(&mut hasher);
+        self.bounds.right.hash(&mut hasher);
+        self.bounds.bottom.hash(&mut hasher);
+        self.shaping.hash(&mut hasher);
+    }
+}
+
+pub type KeyHash = u64;
+
+/// A font.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Font {
+    // TODO: replace this with custom type to get rid of <'a>
+    pub family: Family,
+    pub weight: Weight,
+    pub stretch: Stretch,
+    pub style: Style,
+    pub monospaced: bool,
+}
+
+impl Font {
+    /// A non-monospaced sans-serif font with normal [`Weight`].
+    pub const DEFAULT: Font = Font {
+        family: Family::SansSerif,
+        weight: Weight::NORMAL,
+        stretch: Stretch::Normal,
+        style: Style::Normal,
+        monospaced: false,
+    };
+
+    /// A monospaced font with normal [`Weight`].
+    pub const MONOSPACE: Font = Font {
+        family: Family::Monospace,
+        monospaced: true,
+        ..Self::DEFAULT
+    };
+
+    /// Creates a non-monospaced [`Font`] with the given [`Family::Name`] and
+    /// normal [`Weight`].
+    pub const fn with_name(name: &'static str) -> Self {
+        Font {
+            family: Family::Name(name),
+            ..Self::DEFAULT
+        }
+    }
+}
+
+/// A font family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Family {
+    /// The name of a font family of choice.
+    Name(&'static str),
+
+    /// Serif fonts represent the formal text style for a script.
+    Serif,
+
+    /// Glyphs in sans-serif fonts, as the term is used in CSS, are generally low
+    /// contrast and have stroke endings that are plain — without any flaring,
+    /// cross stroke, or other ornamentation.
+    #[default]
+    SansSerif,
+
+    /// Glyphs in cursive fonts generally use a more informal script style, and
+    /// the result looks more like handwritten pen or brush writing than printed
+    /// letterwork.
+    Cursive,
+
+    /// Fantasy fonts are primarily decorative or expressive fonts that contain
+    /// decorative or expressive representations of characters.
+    Fantasy,
+
+    /// The sole criterion of a monospace font is that all glyphs have the same
+    /// fixed width.
+    Monospace,
+}
+
+impl Family {
+    pub fn into_glyphon_family(&self) -> glyphon::Family<'static> {
+        match self {
+            Family::Name(name) => glyphon::Family::Name(name),
+            Family::Serif => glyphon::Family::Serif,
+            Family::SansSerif => glyphon::Family::SansSerif,
+            Family::Cursive => glyphon::Family::Cursive,
+            Family::Fantasy => glyphon::Family::Fantasy,
+            Family::Monospace => glyphon::Family::Monospace,
+        }
     }
 }
 

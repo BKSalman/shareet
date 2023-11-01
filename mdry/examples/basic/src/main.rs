@@ -45,7 +45,9 @@ fn main() -> Result<(), Error> {
             color: Color::rgb(0, 0, 0),
         }));
 
-        state.draw_text_absolute("lmao", 40., 40., Color::rgb(0, 100, 0), 20.);
+        // if the text doesn't change, then draw_text_absolute_cached should be used
+        // otherwise, draw_text_absolute can be used
+        state.draw_text_absolute_cached("lmao", 40., 40., Color::rgb(0, 100, 0), 20.);
 
         let event = connection.wait_for_event()?;
         let mut event_option = Some(event);

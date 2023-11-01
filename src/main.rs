@@ -66,6 +66,7 @@ fn main() -> Result<(), Error> {
         foreground,
         Color::rgb(233, 86, 120),
         5.,
+        bar.state.font_system_mut(),
     )?));
 
     bar.widgets.push(Box::new(SysTray::new(

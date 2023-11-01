@@ -1,4 +1,5 @@
 use crossbeam::channel::Sender;
+use glyphon::FontSystem;
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -48,6 +49,7 @@ impl Pager {
         text_color: Color,
         selector_color: Color,
         padding: f32,
+        font_system: &mut FontSystem,
     ) -> Result<Self, crate::Error> {
         let font = connection.generate_id()?;
         connection.open_font(font, b"cursor")?;
@@ -125,6 +127,7 @@ impl Widget for Pager {
             desktops
                 .iter()
                 .fold((0., Vec::new()), |(offset, mut text_widgets), t| {
+                    let (width, height) = state.measure_text(t, self.text_metrics);
                     let mut text_widget = TextWidget::new(
                         offset + self.padding,
                         0.,
@@ -132,6 +135,8 @@ impl Widget for Pager {
                         self.text_color,
                         self.text_metrics.font_size,
                         None,
+                        width,
+                        height,
                     );
 
                     text_widget

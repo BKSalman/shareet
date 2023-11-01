@@ -12,6 +12,8 @@ pub struct TextWidget {
     font_size: f32,
     background: Option<Color>,
     requires_redraw: bool,
+    width: f32,
+    height: f32,
 }
 
 impl TextWidget {
@@ -22,6 +24,8 @@ impl TextWidget {
         text_color: Color,
         font_size: f32,
         background_color: Option<Color>,
+        width: f32,
+        height: f32,
     ) -> Self {
         Self {
             content: content.to_string(),
@@ -31,6 +35,8 @@ impl TextWidget {
             y,
             color: text_color,
             font_size,
+            width,
+            height,
         }
     }
 
@@ -82,21 +88,19 @@ impl Widget for TextWidget {
         state: &mut State,
         offset: f32,
     ) -> Result<(), crate::Error> {
-        measure_text(state.draw_text_absolute(
+        state.draw_text_absolute_cached(
             &self.content,
             self.x + offset,
             self.y,
             self.color,
             self.font_size,
-        ));
+        );
 
         Ok(())
     }
 
     fn size(&self, state: &mut State) -> f32 {
-        state
-            .measure_text(&self.content, Metrics::new(self.font_size, self.font_size))
-            .0
+        self.width
     }
 
     fn requires_redraw(&self) -> bool {
