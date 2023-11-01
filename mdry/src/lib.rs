@@ -98,7 +98,7 @@ impl<'a> State<'a> {
                 force_fallback_adapter: false,
             })
             .await
-            .unwrap();
+            .expect("Could not get adapter");
 
         let (device, queue) = adapter
             .request_device(
